@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Document Body -->
+    <path
+        android:pathData="M34,24 L62,24 L74,36 L74,80 C74,82.2 72.2,84 70,84 L34,84 C31.8,84 30,82.2 30,80 L30,28 C30,25.8 31.8,24 34,24 Z"
+        android:strokeWidth="2.5"
+        android:strokeColor="#38BDF8">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="30"
+                android:startY="24"
+                android:endX="74"
+                android:endY="84"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#2563EB" />
+                <item android:offset="1.0" android:color="#7C3AED" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Document Fold -->
+    <path
+        android:pathData="M62,24 L62,36 L74,36 Z"
+        android:fillColor="#60A5FA" />
+
+    <!-- File Code / Content Bars -->
+    <path
+        android:pathData="M38,42 L52,42 M38,48 L48,48"
+        android:strokeColor="#BAE6FD"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+
+    <!-- Conversion & Compression Symbol in Center/Bottom -->
+    <!-- Top conversion arrow (pointing right) -->
+    <path
+        android:pathData="M38,58 L60,58 M56,54 L61,58 L56,62"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Bottom conversion arrow (pointing left) -->
+    <path
+        android:pathData="M66,68 L44,68 M48,64 L43,68 L48,72"
+        android:strokeColor="#F472B6"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Center Compression Clamp Badge -->
+    <path
+        android:pathData="M62,48 L68,48 M62,54 L68,54 M65,48 L65,54"
+        android:strokeColor="#FBBF24"
+        android:strokeWidth="2"
+        android:strokeLineCap="round" />
+</vector>

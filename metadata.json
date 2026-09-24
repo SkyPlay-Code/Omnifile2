@@ -1,0 +1,6 @@
+{
+  "name": "OmniFile",
+  "description": "Universal local file converter and smart compressor for any file format with custom target size compression.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
