@@ -48,6 +48,7 @@ object UniversalConverter {
         context: Context,
         source: FileDetails,
         target: TargetFormat,
+        metadataConfig: com.example.model.MetadataConfig = com.example.model.MetadataConfig(),
         onProgress: (Float, String) -> Unit
     ): ConversionJobResult = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
@@ -163,19 +164,34 @@ object UniversalConverter {
                 }
             }
 
-            onProgress(1.0f, "Completed!")
+            // Apply metadata preferences
+            MetadataHelper.applyMetadataPreferences(context, source.uri, outputFile, metadataConfig, source.timestamp)
+
+            onProgress(0.95f, "Saving to public Downloads/OmniFile folder...")
+            val savedInfo = DownloadStorageHelper.saveToDownloads(context, outputFile, outputFile.name, target.mimeType)
+
+            onProgress(1.0f, "Completed! Saved to Downloads")
             val duration = System.currentTimeMillis() - startTime
+
+            val metaSummary = when {
+                metadataConfig.stripAllForPrivacy -> "Metadata stripped for privacy"
+                metadataConfig.preserveExif && source.category == FileCategory.IMAGE -> "EXIF, camera & timestamp preserved"
+                metadataConfig.preserveTimestamps -> "Timestamps preserved"
+                else -> "Default metadata"
+            }
 
             ConversionJobResult(
                 isSuccess = true,
                 inputName = source.name,
                 inputSizeBytes = source.size,
-                outputName = outputFile.name,
-                outputSizeBytes = outputFile.length(),
-                outputPath = outputFile.absolutePath,
+                outputName = savedInfo.fileName,
+                outputSizeBytes = savedInfo.sizeBytes,
+                outputPath = savedInfo.absolutePath,
+                savedRelativePath = savedInfo.relativeFolder,
                 durationMs = duration,
                 format = target.label,
-                message = "Successfully converted to ${target.label}"
+                message = "Saved to ${savedInfo.relativeFolder}/${savedInfo.fileName}",
+                metadataPreservedSummary = metaSummary
             )
         } catch (e: Exception) {
             e.printStackTrace()

@@ -125,7 +125,7 @@ fun HistoryScreen(
             }
         }
 
-        // Filter chips and Clear Button
+        // Filter chips and Action Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -141,12 +141,21 @@ fun HistoryScreen(
                 }
             }
 
-            if (records.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(
-                    onClick = { viewModel.clearAllHistory() },
+                    onClick = { viewModel.openDownloadsFolder(context) },
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("Clear All", fontSize = 11.sp)
+                    Text("Downloads", fontSize = 11.sp)
+                }
+
+                if (records.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = { viewModel.clearAllHistory() },
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Clear All", fontSize = 11.sp)
+                    }
                 }
             }
         }
@@ -190,6 +199,7 @@ fun HistoryScreen(
                         record = record,
                         onOpen = { viewModel.openFile(context, record.outputPath) },
                         onShare = { viewModel.shareFile(context, record.outputPath) },
+                        onPreview = { viewModel.showPreview(record.outputPath) },
                         onDelete = { viewModel.deleteHistoryItem(record) }
                     )
                 }
@@ -206,6 +216,7 @@ fun HistoryRecordCard(
     record: ConversionRecord,
     onOpen: () -> Unit,
     onShare: () -> Unit,
+    onPreview: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -298,22 +309,22 @@ fun HistoryRecordCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Open & Share actions
+            // Preview, Open & Share actions
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(
-                    onClick = onOpen,
+                androidx.compose.material3.Button(
+                    onClick = onPreview,
                     shape = RoundedCornerShape(6.dp),
                     modifier = Modifier.height(32.dp)
                 ) {
                     Icon(imageVector = Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Open", fontSize = 11.sp)
+                    Text("Inspect / Play", fontSize = 11.sp)
                 }
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
                 OutlinedButton(
                     onClick = onShare,
                     shape = RoundedCornerShape(6.dp),

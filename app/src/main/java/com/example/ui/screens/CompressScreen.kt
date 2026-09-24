@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -54,38 +55,63 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.BatchJobSummary
 import com.example.model.CompressionConfig
 import com.example.model.CompressionMode
 import com.example.model.ConversionJobResult
 import com.example.model.FileDetails
+import com.example.model.MetadataConfig
 import com.example.model.QualityProfile
 import com.example.ui.MainViewModel
+import com.example.ui.components.BatchJobResultCard
 import com.example.ui.components.FileDetailsCard
 import com.example.ui.components.JobResultCard
+import com.example.ui.components.MetadataPreferenceCard
 import com.example.ui.theme.EmeraldSuccess
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CompressScreen(
     viewModel: MainViewModel,
-    selectedFile: FileDetails?,
+    selectedFiles: List<FileDetails>,
     compressionConfig: CompressionConfig,
+    metadataConfig: MetadataConfig,
     isProcessing: Boolean,
     progress: Float,
     progressStatus: String,
     lastJobResult: ConversionJobResult?,
+    batchSummary: BatchJobSummary?,
     sampleFiles: List<FileDetails>,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.selectUri(it) }
+    val multipleFilesPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.selectUris(uris)
+        }
+    }
+
+    val addMoreFilesPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.addUris(uris)
+        }
+    }
+
+    val visualMediaPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.selectUris(uris)
+        }
     }
 
     var customSizeInput by remember { mutableStateOf("500") }
@@ -134,7 +160,7 @@ fun CompressScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Compress any file to your exact chosen size or ratio",
+                        text = "Batch compress any files to your exact chosen size or ratio",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -142,17 +168,22 @@ fun CompressScreen(
             }
         }
 
-        // File Details / Selector
+        // File Details / Batch Queue Card
         FileDetailsCard(
-            file = selectedFile,
-            onPickFileClick = { filePickerLauncher.launch(arrayOf("*/*")) },
+            files = selectedFiles,
+            onPickFilesClick = { multipleFilesPicker.launch(arrayOf("*/*")) },
+            onPickPhotosClick = { visualMediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+            onAddMoreFilesClick = { addMoreFilesPicker.launch(arrayOf("*/*")) },
+            onRemoveFile = { viewModel.removeFile(it) },
             onClearClick = { viewModel.clearSelection() },
             sampleFiles = sampleFiles,
             onSelectSample = { viewModel.selectSampleFile(it) }
         )
 
-        // Compression Settings (when file selected)
-        if (selectedFile != null) {
+        // Compression Settings (when at least 1 file selected)
+        if (selectedFiles.isNotEmpty()) {
+            val totalBatchBytes = selectedFiles.sumOf { it.size }
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -216,7 +247,7 @@ fun CompressScreen(
                     // Mode 0: EXACT TARGET SIZE
                     if (compressionConfig.mode == CompressionMode.EXACT_TARGET_SIZE) {
                         Text(
-                            text = "Choose target size constraint:",
+                            text = "Target size per file:",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -389,18 +420,18 @@ fun CompressScreen(
                         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
                     ) {
                         val projectedTargetBytes = when (compressionConfig.mode) {
-                            CompressionMode.EXACT_TARGET_SIZE -> compressionConfig.targetSizeBytes
-                            CompressionMode.PERCENTAGE_REDUCTION -> (selectedFile.size * (100 - compressionConfig.percentageReduction) / 100.0).toLong()
+                            CompressionMode.EXACT_TARGET_SIZE -> compressionConfig.targetSizeBytes * selectedFiles.size
+                            CompressionMode.PERCENTAGE_REDUCTION -> (totalBatchBytes * (100 - compressionConfig.percentageReduction) / 100.0).toLong()
                             CompressionMode.QUALITY_PRESET -> when (compressionConfig.qualityProfile) {
-                                QualityProfile.ULTRA_COMPACT -> (selectedFile.size * 0.25).toLong()
-                                QualityProfile.BALANCED -> (selectedFile.size * 0.50).toLong()
-                                QualityProfile.HIGH_FIDELITY -> (selectedFile.size * 0.75).toLong()
-                                QualityProfile.EXTREME_DEFLATE -> (selectedFile.size * 0.60).toLong()
+                                QualityProfile.ULTRA_COMPACT -> (totalBatchBytes * 0.25).toLong()
+                                QualityProfile.BALANCED -> (totalBatchBytes * 0.50).toLong()
+                                QualityProfile.HIGH_FIDELITY -> (totalBatchBytes * 0.75).toLong()
+                                QualityProfile.EXTREME_DEFLATE -> (totalBatchBytes * 0.60).toLong()
                             }
                         }
-                        val estSavings = if (selectedFile.size > 0) {
-                            val diff = selectedFile.size - projectedTargetBytes
-                            ((diff.toDouble() / selectedFile.size.toDouble()) * 100).toInt().coerceIn(0, 99)
+                        val estSavings = if (totalBatchBytes > 0) {
+                            val diff = totalBatchBytes - projectedTargetBytes
+                            ((diff.toDouble() / totalBatchBytes.toDouble()) * 100).toInt().coerceIn(0, 99)
                         } else 0
 
                         Row(
@@ -411,12 +442,19 @@ fun CompressScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
-                                Text(text = "CURRENT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(text = selectedFile.formattedSize, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                                Text(
+                                    text = if (selectedFiles.size > 1) "CURRENT BATCH" else "CURRENT",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = FileDetails.formatBytes(totalBatchBytes),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                )
                             }
                             Text(text = "➔", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
                             Column(horizontalAlignment = Alignment.End) {
-                                Text(text = "TARGET LIMIT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(text = "TARGET PROJECTION", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(
                                     text = "${FileDetails.formatBytes(projectedTargetBytes)} (~$estSavings% saved)",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = EmeraldSuccess)
@@ -426,6 +464,12 @@ fun CompressScreen(
                     }
                 }
             }
+
+            // Metadata Preferences
+            MetadataPreferenceCard(
+                config = metadataConfig,
+                onConfigChange = { viewModel.setMetadataConfig(it) }
+            )
 
             // Compress Action Button
             Spacer(modifier = Modifier.height(4.dp))
@@ -446,8 +490,12 @@ fun CompressScreen(
                         Text(
                             text = progressStatus,
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "${(progress * 100).toInt()}%",
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
@@ -482,19 +530,34 @@ fun CompressScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Compress to Target Size",
+                        text = if (selectedFiles.size > 1) {
+                            "Compress Batch (${selectedFiles.size} Files) to Target"
+                        } else {
+                            "Compress to Target Size"
+                        },
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                 }
             }
         }
 
-        // Job Result
-        if (lastJobResult != null) {
+        // Job Results
+        if (batchSummary != null && batchSummary.results.size > 1) {
+            BatchJobResultCard(
+                summary = batchSummary,
+                onOpenClick = { viewModel.openFile(context, it) },
+                onShareClick = { viewModel.shareFile(context, it) },
+                onPreviewClick = { viewModel.showPreview(it) },
+                onShareAllClick = { viewModel.shareAllResults(context, it) },
+                onOpenFolderClick = { viewModel.openDownloadsFolder(context) }
+            )
+        } else if (lastJobResult != null) {
             JobResultCard(
                 result = lastJobResult,
                 onOpenClick = { viewModel.openFile(context, it) },
-                onShareClick = { viewModel.shareFile(context, it) }
+                onShareClick = { viewModel.shareFile(context, it) },
+                onPreviewClick = { viewModel.showPreview(it) },
+                onOpenFolderClick = { viewModel.openDownloadsFolder(context) }
             )
         }
 

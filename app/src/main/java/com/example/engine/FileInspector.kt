@@ -139,6 +139,21 @@ object FileInspector {
             } catch (_: Exception) {}
         }
 
+        var exifSummary: ExifSummary? = null
+        if (category == FileCategory.IMAGE) {
+            exifSummary = MetadataHelper.extractExifSummary(context, uri)
+        }
+
+        var timestamp: Long? = null
+        try {
+            if (uri.scheme == "file") {
+                uri.path?.let { p ->
+                    val f = File(p)
+                    if (f.exists()) timestamp = f.lastModified()
+                }
+            }
+        } catch (_: Exception) {}
+
         return FileDetails(
             uri = uri,
             name = fileName,
@@ -150,7 +165,11 @@ object FileInspector {
             durationText = durationText,
             lineCount = lineCount,
             hexSnippet = hexSnippet,
-            textSnippet = textSnippet
+            textSnippet = textSnippet,
+            timestamp = timestamp,
+            exifMakeModel = exifSummary?.makeModel,
+            exifDate = exifSummary?.dateTaken,
+            hasGps = exifSummary?.hasGps ?: false
         )
     }
 

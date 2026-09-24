@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -54,35 +55,63 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.BatchJobSummary
+import com.example.model.ConversionJobResult
 import com.example.model.FileCategory
+import com.example.model.FileDetails
+import com.example.model.MetadataConfig
 import com.example.model.SupportedFormats
 import com.example.model.TargetFormat
 import com.example.ui.MainViewModel
+import com.example.ui.components.BatchJobResultCard
 import com.example.ui.components.FileDetailsCard
 import com.example.ui.components.JobResultCard
+import com.example.ui.components.MetadataPreferenceCard
 import com.example.ui.components.getCategoryIcon
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ConvertScreen(
     viewModel: MainViewModel,
-    selectedFile: com.example.model.FileDetails?,
+    selectedFiles: List<FileDetails>,
     targetFormat: TargetFormat,
+    metadataConfig: MetadataConfig,
     isProcessing: Boolean,
     progress: Float,
     progressStatus: String,
-    lastJobResult: com.example.model.ConversionJobResult?,
-    sampleFiles: List<com.example.model.FileDetails>,
+    lastJobResult: ConversionJobResult?,
+    batchSummary: BatchJobSummary?,
+    sampleFiles: List<FileDetails>,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    // Document / any file picker launcher
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.selectUri(it) }
+    // Multiple Document picker launcher
+    val multipleFilesPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.selectUris(uris)
+        }
+    }
+
+    // Append more files launcher
+    val addMoreFilesPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.addUris(uris)
+        }
+    }
+
+    // Photo/Video picker launcher for multiple items
+    val visualMediaPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.selectUris(uris)
+        }
     }
 
     val categories = remember {
@@ -142,7 +171,7 @@ fun ConvertScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Convert any file to any format locally on your device",
+                        text = "Batch convert any files to any format locally on device",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -150,20 +179,25 @@ fun ConvertScreen(
             }
         }
 
-        // File Details or Picker
+        // File Details / Batch Queue Card
         FileDetailsCard(
-            file = selectedFile,
-            onPickFileClick = { filePickerLauncher.launch(arrayOf("*/*")) },
+            files = selectedFiles,
+            onPickFilesClick = { multipleFilesPicker.launch(arrayOf("*/*")) },
+            onPickPhotosClick = { visualMediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+            onAddMoreFilesClick = { addMoreFilesPicker.launch(arrayOf("*/*")) },
+            onRemoveFile = { viewModel.removeFile(it) },
             onClearClick = { viewModel.clearSelection() },
             sampleFiles = sampleFiles,
             onSelectSample = { viewModel.selectSampleFile(it) }
         )
 
-        // Target Format Selector (Only visible if file is selected)
-        if (selectedFile != null) {
+        // Target Format Selector (Only visible if at least 1 file is selected)
+        if (selectedFiles.isNotEmpty()) {
+            val primaryFile = selectedFiles.first()
+
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "TARGET FORMAT",
+                    text = "TARGET FORMAT FOR BATCH",
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -196,7 +230,7 @@ fun ConvertScreen(
                 // Formats for selected category
                 val visibleFormats = when (selectedCategoryIndex) {
                     0 -> {
-                        val recommended = SupportedFormats.getRecommendedFor(selectedFile.category, selectedFile.extension)
+                        val recommended = SupportedFormats.getRecommendedFor(primaryFile.category, primaryFile.extension)
                         if (recommended.isNotEmpty()) recommended else SupportedFormats.ALL_TARGETS.take(6)
                     }
                     1 -> SupportedFormats.ALL_TARGETS.filter { it.category == FileCategory.IMAGE }
@@ -259,6 +293,12 @@ fun ConvertScreen(
                 }
             }
 
+            // Metadata Preferences
+            MetadataPreferenceCard(
+                config = metadataConfig,
+                onConfigChange = { viewModel.setMetadataConfig(it) }
+            )
+
             // Convert Button / Progress
             Spacer(modifier = Modifier.height(4.dp))
             if (isProcessing) {
@@ -278,8 +318,12 @@ fun ConvertScreen(
                         Text(
                             text = progressStatus,
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "${(progress * 100).toInt()}%",
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
@@ -314,19 +358,34 @@ fun ConvertScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Convert to ${targetFormat.label}",
+                        text = if (selectedFiles.size > 1) {
+                            "Convert Batch (${selectedFiles.size} Files) to ${targetFormat.label}"
+                        } else {
+                            "Convert to ${targetFormat.label}"
+                        },
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                 }
             }
         }
 
-        // Job Result
-        if (lastJobResult != null) {
+        // Job Results
+        if (batchSummary != null && batchSummary.results.size > 1) {
+            BatchJobResultCard(
+                summary = batchSummary,
+                onOpenClick = { viewModel.openFile(context, it) },
+                onShareClick = { viewModel.shareFile(context, it) },
+                onPreviewClick = { viewModel.showPreview(it) },
+                onShareAllClick = { viewModel.shareAllResults(context, it) },
+                onOpenFolderClick = { viewModel.openDownloadsFolder(context) }
+            )
+        } else if (lastJobResult != null) {
             JobResultCard(
                 result = lastJobResult,
                 onOpenClick = { viewModel.openFile(context, it) },
-                onShareClick = { viewModel.shareFile(context, it) }
+                onShareClick = { viewModel.shareFile(context, it) },
+                onPreviewClick = { viewModel.showPreview(it) },
+                onOpenFolderClick = { viewModel.openDownloadsFolder(context) }
             )
         }
 

@@ -94,19 +94,40 @@ object UniversalCompressor {
                 }
             }
 
-            onProgress(1.0f, "Compression finished!")
+            // Apply metadata preferences
+            MetadataHelper.applyMetadataPreferences(context, source.uri, outputFile, config.metadataConfig, source.timestamp)
+
+            onProgress(0.95f, "Saving to public Downloads/OmniFile folder...")
+            val mime = when (source.category) {
+                FileCategory.IMAGE -> if (outputFile.extension == "png") "image/png" else "image/jpeg"
+                FileCategory.AUDIO -> "audio/mp4"
+                FileCategory.DOCUMENT -> "application/pdf"
+                else -> "application/zip"
+            }
+            val savedInfo = DownloadStorageHelper.saveToDownloads(context, outputFile, outputFile.name, mime)
+
+            onProgress(1.0f, "Compression finished! Saved to Downloads")
             val duration = System.currentTimeMillis() - startTime
+
+            val metaSummary = when {
+                config.metadataConfig.stripAllForPrivacy -> "Metadata stripped for privacy"
+                config.metadataConfig.preserveExif && source.category == FileCategory.IMAGE -> "EXIF, camera & timestamp preserved"
+                config.metadataConfig.preserveTimestamps -> "Timestamps preserved"
+                else -> "Default metadata"
+            }
 
             ConversionJobResult(
                 isSuccess = true,
                 inputName = source.name,
                 inputSizeBytes = source.size,
-                outputName = outputFile.name,
-                outputSizeBytes = outputFile.length(),
-                outputPath = outputFile.absolutePath,
+                outputName = savedInfo.fileName,
+                outputSizeBytes = savedInfo.sizeBytes,
+                outputPath = savedInfo.absolutePath,
+                savedRelativePath = savedInfo.relativeFolder,
                 durationMs = duration,
-                format = "Compressed (${FileDetails.formatBytes(outputFile.length())})",
-                message = "Successfully compressed to ${FileDetails.formatBytes(outputFile.length())} (Target was $targetLabel)"
+                format = "Compressed (${FileDetails.formatBytes(savedInfo.sizeBytes)})",
+                message = "Saved to ${savedInfo.relativeFolder}/${savedInfo.fileName} (Target was $targetLabel)",
+                metadataPreservedSummary = metaSummary
             )
         } catch (e: Exception) {
             e.printStackTrace()

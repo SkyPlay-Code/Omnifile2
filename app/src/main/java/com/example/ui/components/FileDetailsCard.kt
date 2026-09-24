@@ -19,18 +19,24 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.DataObject
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DynamicFeed
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.SettingsEthernet
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.VideoFile
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -62,8 +68,11 @@ import com.example.model.FileDetails
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FileDetailsCard(
-    file: FileDetails?,
-    onPickFileClick: () -> Unit,
+    files: List<FileDetails>,
+    onPickFilesClick: () -> Unit,
+    onPickPhotosClick: () -> Unit,
+    onAddMoreFilesClick: () -> Unit,
+    onRemoveFile: (FileDetails) -> Unit,
     onClearClick: () -> Unit,
     sampleFiles: List<FileDetails>,
     onSelectSample: (FileDetails) -> Unit,
@@ -88,8 +97,8 @@ fun FileDetailsCard(
                 .fillMaxWidth()
                 .padding(16.dp)
         ) {
-            if (file == null) {
-                // Empty state / prompt to select file
+            // STATE 1: NO FILES SELECTED
+            if (files.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -100,8 +109,7 @@ fun FileDetailsCard(
                             shape = RoundedCornerShape(12.dp)
                         )
                         .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
-                        .clickable { onPickFileClick() }
-                        .padding(vertical = 24.dp, horizontal = 16.dp),
+                        .padding(20.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -116,24 +124,59 @@ fun FileDetailsCard(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.UploadFile,
-                                contentDescription = "Upload any file",
+                                imageVector = Icons.Default.DynamicFeed,
+                                contentDescription = "Select multiple files",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(32.dp)
                             )
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "Select Any File to Process",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                            text = "Select Files to Process",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Tap here to pick from device or browse files",
+                            text = "Select single or multiple files for batch processing",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Selection Buttons
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Button(
+                                onClick = onPickFilesClick,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("pick_multiple_files_button"),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                )
+                            ) {
+                                Icon(imageVector = Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("All Files", fontSize = 12.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = onPickPhotosClick,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("pick_multiple_photos_button"),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Photos & Video", fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
 
@@ -176,8 +219,10 @@ fun FileDetailsCard(
                         }
                     }
                 }
-            } else {
-                // File Selected Header
+            }
+            // STATE 2: SINGLE FILE SELECTED
+            else if (files.size == 1) {
+                val file = files.first()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -278,93 +323,165 @@ fun FileDetailsCard(
                     }
                 }
 
-                // Expandable Hex / Content Inspector
-                if (file.hexSnippet != null || file.textSnippet != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { isSnippetExpanded = !isSnippetExpanded }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                // Action Bar: Add More Files + Change
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = onAddMoreFilesClick,
+                        modifier = Modifier.testTag("add_more_files_button"),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text(
-                            text = if (isSnippetExpanded) "Hide Stream Inspector" else "Inspect Stream Header & Hex",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Icon(
-                            imageVector = if (isSnippetExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Add More Files", fontSize = 12.sp)
                     }
 
-                    AnimatedVisibility(visible = isSnippetExpanded) {
-                        Column(
+                    OutlinedButton(
+                        onClick = onPickFilesClick,
+                        modifier = Modifier.testTag("change_file_button"),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(text = "Replace", fontSize = 12.sp)
+                    }
+                }
+            }
+            // STATE 3: MULTIPLE FILES SELECTED (BATCH QUEUE)
+            else {
+                val totalBytes = files.sumOf { it.size }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 6.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surface)
-                                .padding(10.dp)
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            if (file.hexSnippet != null) {
-                                Text(
-                                    text = "RAW HEX HEAD (First 64 Bytes):",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = file.hexSnippet,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    lineHeight = 14.sp
-                                )
-                            }
-                            if (file.textSnippet != null) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "TEXT STREAM PREVIEW:",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = file.textSnippet,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 6,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.DynamicFeed,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
                         }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Batch Queue: ${files.size} Files Selected",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Total Size: ${FileDetails.formatBytes(totalBytes)}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = onClearClick, modifier = Modifier.testTag("clear_batch_button")) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteSweep,
+                            contentDescription = "Clear all files",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
-                // Change File Button
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Scrollable File Queue Cards
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    files.take(6).forEach { file ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = getCategoryIcon(file.category),
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = file.name,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = file.formattedSize,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    IconButton(
+                                        onClick = { onRemoveFile(file) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove file",
+                                            modifier = Modifier.size(14.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (files.size > 6) {
+                        Text(
+                            text = "... and ${files.size - 6} more files in batch",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                        )
+                    }
+                }
+
+                // Add more files button
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
                     OutlinedButton(
-                        onClick = onPickFileClick,
-                        modifier = Modifier.testTag("change_file_button"),
+                        onClick = onAddMoreFilesClick,
+                        modifier = Modifier.testTag("add_more_batch_button"),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.UploadFile,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(text = "Choose Another File", fontSize = 12.sp)
+                        Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Add More Files", fontSize = 12.sp)
                     }
                 }
             }

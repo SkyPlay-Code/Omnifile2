@@ -16,10 +16,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -48,6 +51,8 @@ fun JobResultCard(
     result: ConversionJobResult,
     onOpenClick: (String) -> Unit,
     onShareClick: (String) -> Unit,
+    onPreviewClick: (String) -> Unit,
+    onOpenFolderClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -57,14 +62,14 @@ fun JobResultCard(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (result.isSuccess) {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
             } else {
                 RoseError.copy(alpha = 0.1f)
             }
         ),
         border = CardDefaults.outlinedCardBorder().copy(
             brush = androidx.compose.ui.graphics.SolidColor(
-                if (result.isSuccess) EmeraldSuccess.copy(alpha = 0.4f) else RoseError.copy(alpha = 0.4f)
+                if (result.isSuccess) EmeraldSuccess.copy(alpha = 0.5f) else RoseError.copy(alpha = 0.4f)
             )
         )
     ) {
@@ -80,7 +85,7 @@ fun JobResultCard(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
                         .background(
                             if (result.isSuccess) EmeraldSuccess.copy(alpha = 0.2f) else RoseError.copy(alpha = 0.2f)
@@ -91,13 +96,13 @@ fun JobResultCard(
                         imageVector = if (result.isSuccess) Icons.Default.CheckCircle else Icons.Default.Error,
                         contentDescription = null,
                         tint = if (result.isSuccess) EmeraldSuccess else RoseError,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (result.isSuccess) "Processing Complete!" else "Process Failed",
+                        text = if (result.isSuccess) "Processing Complete & Saved!" else "Process Failed",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -110,13 +115,72 @@ fun JobResultCard(
             }
 
             if (result.isSuccess) {
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Location Confirmation Banner
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = EmeraldSuccess.copy(alpha = 0.12f)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = EmeraldSuccess,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Saved in Downloads/OmniFile",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = EmeraldSuccess
+                                )
+                                Text(
+                                    text = result.outputName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = onOpenFolderClick,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("Open Folder", fontSize = 11.sp)
+                        }
+                    }
+                }
+
+                if (result.metadataPreservedSummary != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Metadata status: ${result.metadataPreservedSummary}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Before vs After Comparison Card
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
                 ) {
                     Row(
                         modifier = Modifier
@@ -205,12 +269,31 @@ fun JobResultCard(
                     }
                 }
 
-                // Actions
+                // Actions: Preview + Share + Open
                 Spacer(modifier = Modifier.height(14.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    Button(
+                        onClick = { onPreviewClick(result.outputPath) },
+                        modifier = Modifier
+                            .weight(1.2f)
+                            .testTag("preview_result_button"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Visibility,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "Inspect / Play")
+                    }
+
                     OutlinedButton(
                         onClick = { onOpenClick(result.outputPath) },
                         modifier = Modifier
@@ -221,28 +304,25 @@ fun JobResultCard(
                         Icon(
                             imageVector = Icons.Default.OpenInNew,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(text = "Open")
                     }
 
-                    Button(
+                    OutlinedButton(
                         onClick = { onShareClick(result.outputPath) },
                         modifier = Modifier
                             .weight(1f)
                             .testTag("share_result_button"),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
-                        )
+                        shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Share,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(text = "Share")
                     }
                 }

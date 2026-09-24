@@ -12,6 +12,15 @@ enum class FileCategory(val title: String, val iconName: String) {
     RAW_BINARY("Universal & Raw", "SettingsEthernet")
 }
 
+data class MetadataConfig(
+    val preserveExif: Boolean = true,
+    val preserveGps: Boolean = true,
+    val preserveTimestamps: Boolean = true,
+    val stripAllForPrivacy: Boolean = false,
+    val customAuthor: String = "",
+    val customCopyright: String = ""
+)
+
 data class FileDetails(
     val uri: Uri,
     val name: String,
@@ -24,7 +33,11 @@ data class FileDetails(
     val lineCount: Int? = null,
     val hexSnippet: String? = null,
     val textSnippet: String? = null,
-    val isSample: Boolean = false
+    val isSample: Boolean = false,
+    val timestamp: Long? = null,
+    val exifMakeModel: String? = null,
+    val exifDate: String? = null,
+    val hasGps: Boolean = false
 ) {
     val formattedSize: String
         get() = formatBytes(size)
@@ -64,7 +77,8 @@ data class CompressionConfig(
     val qualityProfile: QualityProfile = QualityProfile.BALANCED,
     val scaleResolution: Float = 1.0f,
     val preserveAudioPitch: Boolean = true,
-    val splitIfExceeds: Boolean = true
+    val splitIfExceeds: Boolean = true,
+    val metadataConfig: MetadataConfig = MetadataConfig()
 )
 
 data class TargetFormat(
@@ -136,9 +150,11 @@ data class ConversionJobResult(
     val outputName: String,
     val outputSizeBytes: Long,
     val outputPath: String,
+    val savedRelativePath: String = "Downloads/OmniFile",
     val durationMs: Long,
     val format: String,
-    val message: String
+    val message: String,
+    val metadataPreservedSummary: String? = null
 ) {
     val speedMegaBytesPerSec: Double
         get() = if (durationMs > 0) {
@@ -153,3 +169,19 @@ data class ConversionJobResult(
             ((diff.toDouble() / inputSizeBytes.toDouble()) * 100).toInt()
         } else 0
 }
+
+data class BatchJobSummary(
+    val results: List<ConversionJobResult>,
+    val totalDurationMs: Long,
+    val mode: String // "CONVERT" or "COMPRESS"
+) {
+    val totalInputBytes: Long get() = results.sumOf { it.inputSizeBytes }
+    val totalOutputBytes: Long get() = results.sumOf { it.outputSizeBytes }
+    val totalSavedBytes: Long get() = (totalInputBytes - totalOutputBytes).coerceAtLeast(0L)
+    val successCount: Int get() = results.count { it.isSuccess }
+    val failureCount: Int get() = results.count { !it.isSuccess }
+    val overallSavingsPercent: Int get() = if (totalInputBytes > 0) {
+        ((totalSavedBytes.toDouble() / totalInputBytes.toDouble()) * 100).toInt()
+    } else 0
+}
+

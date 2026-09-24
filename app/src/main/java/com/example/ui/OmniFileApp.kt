@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ElectricBolt
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.OfflineBolt
 import androidx.compose.material.icons.filled.Sync
@@ -65,6 +66,7 @@ fun OmniFileApp(
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf(NavigationTab.Convert, NavigationTab.Compress, NavigationTab.Tools, NavigationTab.History)
 
+    val selectedFiles by viewModel.selectedFiles.collectAsStateWithLifecycle()
     val selectedFile by viewModel.selectedFile.collectAsStateWithLifecycle()
     val targetFormat by viewModel.targetFormat.collectAsStateWithLifecycle()
     val compressionConfig by viewModel.compressionConfig.collectAsStateWithLifecycle()
@@ -72,10 +74,14 @@ fun OmniFileApp(
     val progress by viewModel.progress.collectAsStateWithLifecycle()
     val progressStatus by viewModel.progressStatus.collectAsStateWithLifecycle()
     val lastJobResult by viewModel.lastJobResult.collectAsStateWithLifecycle()
+    val batchSummary by viewModel.batchSummary.collectAsStateWithLifecycle()
     val sampleFiles by viewModel.sampleFiles.collectAsStateWithLifecycle()
     val historyRecords by viewModel.historyRecords.collectAsStateWithLifecycle()
     val totalSavingsBytes by viewModel.totalSavingsBytes.collectAsStateWithLifecycle()
     val totalCount by viewModel.totalOperationsCount.collectAsStateWithLifecycle()
+    val metadataConfig by viewModel.metadataConfig.collectAsStateWithLifecycle()
+    val previewFilePath by viewModel.previewFilePath.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -132,6 +138,17 @@ fun OmniFileApp(
                         }
                     }
                 },
+                actions = {
+                    androidx.compose.material3.IconButton(
+                        onClick = { viewModel.openDownloadsFolder(context) }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Folder,
+                            contentDescription = "Open Downloads Folder",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
@@ -171,22 +188,26 @@ fun OmniFileApp(
             when (selectedTab) {
                 0 -> ConvertScreen(
                     viewModel = viewModel,
-                    selectedFile = selectedFile,
+                    selectedFiles = selectedFiles,
                     targetFormat = targetFormat,
+                    metadataConfig = metadataConfig,
                     isProcessing = isProcessing,
                     progress = progress,
                     progressStatus = progressStatus,
                     lastJobResult = lastJobResult,
+                    batchSummary = batchSummary,
                     sampleFiles = sampleFiles
                 )
                 1 -> CompressScreen(
                     viewModel = viewModel,
-                    selectedFile = selectedFile,
+                    selectedFiles = selectedFiles,
                     compressionConfig = compressionConfig,
+                    metadataConfig = metadataConfig,
                     isProcessing = isProcessing,
                     progress = progress,
                     progressStatus = progressStatus,
                     lastJobResult = lastJobResult,
+                    batchSummary = batchSummary,
                     sampleFiles = sampleFiles
                 )
                 2 -> BatchAndToolsScreen(
@@ -197,6 +218,15 @@ fun OmniFileApp(
                     records = historyRecords,
                     totalSavingsBytes = totalSavingsBytes,
                     totalCount = totalCount
+                )
+            }
+
+            // Live In-App File Preview Dialog
+            if (previewFilePath != null) {
+                com.example.ui.components.FilePreviewDialog(
+                    filePath = previewFilePath!!,
+                    onDismiss = { viewModel.dismissPreview() },
+                    onShare = { viewModel.shareFile(context, previewFilePath!!) }
                 )
             }
         }
