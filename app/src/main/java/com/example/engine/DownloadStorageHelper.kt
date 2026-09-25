@@ -29,60 +29,27 @@ object DownloadStorageHelper {
     private const val SUBFOLDER = "OmniFile"
 
     /**
-     * Copies a file to the public Downloads/OmniFile directory using MediaStore on API 29+
-     * and direct public external directory with MediaScanner on all APIs.
+     * Saves ONLY the final output file to the public Downloads/OmniFile directory.
+     * Uses MediaStore exclusively on API 29+ and direct public directory on older APIs
+     * to prevent creating duplicate files or saving inputs.
      */
     suspend fun saveToDownloads(
         context: Context,
-        sourceFile: File,
+        outputFile: File,
         targetFileName: String,
         mimeType: String
     ): SavedFileInfo = withContext(Dispatchers.IO) {
         var savedUri: Uri? = null
-        var finalFile: File? = null
+        var finalAbsolutePath = ""
+        var finalSize = outputFile.length()
+        var finalName = targetFileName
 
-        // 1. Direct file write to public Downloads directory
-        try {
-            val publicDownloadsDir = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                SUBFOLDER
-            )
-            if (!publicDownloadsDir.exists()) {
-                publicDownloadsDir.mkdirs()
-            }
-            finalFile = File(publicDownloadsDir, targetFileName)
-
-            // Avoid collisions by renaming if already exists
-            var counter = 1
-            val baseName = targetFileName.substringBeforeLast('.')
-            val ext = targetFileName.substringAfterLast('.', "")
-            while (finalFile!!.exists()) {
-                val newName = if (ext.isNotEmpty()) "${baseName}_$counter.$ext" else "${baseName}_$counter"
-                finalFile = File(publicDownloadsDir, newName)
-                counter++
-            }
-
-            sourceFile.inputStream().use { input ->
-                FileOutputStream(finalFile).use { output ->
-                    input.copyTo(output, 32768)
-                }
-            }
-
-            // Run media scanner so Downloads & Gallery index it immediately
-            MediaScannerConnection.scanFile(
-                context,
-                arrayOf(finalFile.absolutePath),
-                arrayOf(mimeType),
-                null
-            )
-        } catch (_: Exception) {}
-
-        // 2. Also insert into MediaStore.Downloads on Android 10+ (API 29+) for guaranteed public visibility
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10+ (API 29+): Use MediaStore exclusively
             try {
                 val resolver = context.contentResolver
                 val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, finalFile?.name ?: targetFileName)
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, targetFileName)
                     put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                     put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$SUBFOLDER")
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
@@ -93,7 +60,7 @@ object DownloadStorageHelper {
 
                 if (itemUri != null) {
                     resolver.openOutputStream(itemUri)?.use { outStream ->
-                        sourceFile.inputStream().use { inStream ->
+                        outputFile.inputStream().use { inStream ->
                             inStream.copyTo(outStream, 32768)
                         }
                     }
@@ -102,27 +69,95 @@ object DownloadStorageHelper {
                     values.put(MediaStore.MediaColumns.IS_PENDING, 0)
                     resolver.update(itemUri, values, null, null)
                     savedUri = itemUri
+
+                    // Query actual display name and size if MediaStore renamed to avoid collision
+                    resolver.query(itemUri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.SIZE), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                            val sizeIdx = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                            if (nameIdx != -1) finalName = cursor.getString(nameIdx)
+                            if (sizeIdx != -1) finalSize = cursor.getLong(sizeIdx)
+                        }
+                    }
                 }
+            } catch (_: Exception) {}
+
+            // Physical path reference for file provider fallback
+            finalAbsolutePath = File(
+                File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), SUBFOLDER),
+                finalName
+            ).absolutePath
+        } else {
+            // Android 9 and below: Direct write to public Downloads directory
+            try {
+                val publicDownloadsDir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    SUBFOLDER
+                ).apply { mkdirs() }
+
+                var candidate = File(publicDownloadsDir, targetFileName)
+                val base = targetFileName.substringBeforeLast('.')
+                val ext = targetFileName.substringAfterLast('.', "")
+                var c = 1
+                while (candidate.exists()) {
+                    val n = if (ext.isNotEmpty()) "${base}_$c.$ext" else "${base}_$c"
+                    candidate = File(publicDownloadsDir, n)
+                    c++
+                }
+
+                outputFile.inputStream().use { input ->
+                    FileOutputStream(candidate).use { output ->
+                        input.copyTo(output, 32768)
+                    }
+                }
+
+                finalName = candidate.name
+                finalAbsolutePath = candidate.absolutePath
+                finalSize = candidate.length()
+
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(finalAbsolutePath),
+                    arrayOf(mimeType),
+                    null
+                )
+
+                savedUri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    candidate
+                )
             } catch (_: Exception) {}
         }
 
-        val actualFile = finalFile ?: sourceFile
-        val actualUri = savedUri ?: try {
-            FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                actualFile
-            )
-        } catch (_: Exception) {
-            Uri.fromFile(actualFile)
+        // Clean up temporary cache file so it does not waste internal storage
+        try {
+            if (outputFile.exists() && outputFile.absolutePath.contains(context.cacheDir.absolutePath)) {
+                outputFile.delete()
+            }
+        } catch (_: Exception) {}
+
+        if (savedUri == null && finalAbsolutePath.isNotEmpty()) {
+            val f = File(finalAbsolutePath)
+            if (f.exists()) {
+                try {
+                    savedUri = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        f
+                    )
+                } catch (_: Exception) {
+                    savedUri = Uri.fromFile(f)
+                }
+            }
         }
 
         SavedFileInfo(
-            fileName = actualFile.name,
+            fileName = finalName,
             relativeFolder = "Downloads/$SUBFOLDER",
-            absolutePath = actualFile.absolutePath,
-            contentUri = actualUri,
-            sizeBytes = actualFile.length()
+            absolutePath = finalAbsolutePath,
+            contentUri = savedUri,
+            sizeBytes = finalSize
         )
     }
 
