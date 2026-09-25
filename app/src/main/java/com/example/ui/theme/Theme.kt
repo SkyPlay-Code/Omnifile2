@@ -8,53 +8,52 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
-private val DarkColorScheme = darkColorScheme(
-    primary = CyanPrimaryDark,
-    onPrimary = CyanOnPrimaryDark,
-    primaryContainer = CyanPrimaryContainerDark,
-    onPrimaryContainer = CyanOnPrimaryContainerDark,
-    secondary = IndigoSecondaryDark,
-    onSecondary = IndigoOnSecondaryDark,
-    secondaryContainer = IndigoSecondaryContainerDark,
-    onSecondaryContainer = IndigoOnSecondaryContainerDark,
-    tertiary = AmberTertiaryDark,
-    onTertiary = AmberOnTertiaryDark,
-    background = SlateBackgroundDark,
-    onBackground = SlateOnBackgroundDark,
-    surface = SlateSurfaceDark,
-    onSurface = SlateOnSurfaceDark,
-    surfaceVariant = SlateSurfaceVariantDark,
-    onSurfaceVariant = SlateOnSurfaceVariantDark,
-    outline = SlateOutlineDark
+private val OrganicDarkColorScheme = darkColorScheme(
+    primary = SagePrimaryDark,
+    onPrimary = SageOnPrimaryDark,
+    primaryContainer = SagePrimaryContainerDark,
+    onPrimaryContainer = SageOnPrimaryContainerDark,
+    secondary = TerracottaSecondaryDark,
+    onSecondary = TerracottaOnSecondaryDark,
+    secondaryContainer = TerracottaSecondaryContainerDark,
+    onSecondaryContainer = TerracottaOnSecondaryContainerDark,
+    tertiary = OliveTertiaryDark,
+    onTertiary = OliveOnTertiaryDark,
+    background = OrganicBackgroundDark,
+    onBackground = OrganicOnBackgroundDark,
+    surface = OrganicSurfaceDark,
+    onSurface = OrganicOnSurfaceDark,
+    surfaceVariant = OrganicSurfaceVariantDark,
+    onSurfaceVariant = OrganicOnSurfaceVariantDark,
+    outline = OrganicOutlineDark
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = CyanPrimaryLight,
-    onPrimary = CyanOnPrimaryLight,
-    primaryContainer = CyanPrimaryContainerLight,
-    onPrimaryContainer = CyanOnPrimaryContainerLight,
-    secondary = IndigoSecondaryLight,
-    onSecondary = IndigoOnSecondaryLight,
-    secondaryContainer = IndigoSecondaryContainerLight,
-    onSecondaryContainer = IndigoOnSecondaryContainerLight,
-    tertiary = AmberTertiaryLight,
-    onTertiary = AmberOnTertiaryLight,
-    background = SlateBackgroundLight,
-    onBackground = SlateOnBackgroundLight,
-    surface = SlateSurfaceLight,
-    onSurface = SlateOnSurfaceLight,
-    surfaceVariant = SlateSurfaceVariantLight,
-    onSurfaceVariant = SlateOnSurfaceVariantLight,
-    outline = SlateOutlineLight
+private val OrganicLightColorScheme = lightColorScheme(
+    primary = SagePrimaryLight,
+    onPrimary = SageOnPrimaryLight,
+    primaryContainer = SagePrimaryContainerLight,
+    onPrimaryContainer = SageOnPrimaryContainerLight,
+    secondary = TerracottaSecondaryLight,
+    onSecondary = TerracottaOnSecondaryLight,
+    secondaryContainer = TerracottaSecondaryContainerLight,
+    onSecondaryContainer = TerracottaOnSecondaryContainerLight,
+    tertiary = OliveTertiaryLight,
+    onTertiary = OliveOnTertiaryLight,
+    background = OrganicBackgroundLight,
+    onBackground = OrganicOnBackgroundLight,
+    surface = OrganicSurfaceLight,
+    onSurface = OrganicOnSurfaceLight,
+    surfaceVariant = OrganicSurfaceVariantLight,
+    onSurfaceVariant = OrganicOnSurfaceVariantLight,
+    outline = OrganicOutlineLight
 )
 
 @Composable
 fun MyApplicationTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Use our carefully crafted precision palette by default
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -62,8 +61,8 @@ fun MyApplicationTheme(
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+        darkTheme -> OrganicDarkColorScheme
+        else -> OrganicLightColorScheme
     }
 
     MaterialTheme(

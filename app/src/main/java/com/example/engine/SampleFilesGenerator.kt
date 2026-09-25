@@ -13,7 +13,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
-import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.sin
@@ -24,66 +23,66 @@ object SampleFilesGenerator {
         val sampleDir = File(context.cacheDir, "sample_files").apply { mkdirs() }
         val results = mutableListOf<FileDetails>()
 
-        // 1. High-Res Image (1600x1200 Photo-like canvas)
-        val imageFile = File(sampleDir, "sample_mountain_sunset.jpg")
+        // 1. High-Res Organic Photo (Forest & Sunlit Canopy)
+        val imageFile = File(sampleDir, "sample_forest_canopy.jpg")
         if (!imageFile.exists() || imageFile.length() < 1000) {
             val bmp = Bitmap.createBitmap(1600, 1200, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-            // Sky gradient
-            paint.shader = LinearGradient(0f, 0f, 0f, 800f, Color.rgb(255, 94, 77), Color.rgb(255, 160, 0), Shader.TileMode.CLAMP)
-            canvas.drawRect(0f, 0f, 1600f, 800f, paint)
+            // Warm sunlit mist sky
+            paint.shader = LinearGradient(0f, 0f, 0f, 700f, Color.rgb(230, 242, 233), Color.rgb(180, 218, 195), Shader.TileMode.CLAMP)
+            canvas.drawRect(0f, 0f, 1600f, 700f, paint)
 
-            // Sun
+            // Morning Sun Glow
             paint.shader = null
-            paint.color = Color.rgb(255, 240, 180)
-            canvas.drawCircle(800f, 400f, 160f, paint)
+            paint.color = Color.rgb(255, 238, 190)
+            canvas.drawCircle(800f, 320f, 180f, paint)
 
-            // Mountains
-            paint.color = Color.rgb(40, 20, 60)
+            // Distant Mountains
+            paint.color = Color.rgb(55, 95, 75)
             val path = android.graphics.Path().apply {
-                moveTo(0f, 800f)
-                lineTo(400f, 450f)
-                lineTo(800f, 750f)
-                lineTo(1200f, 380f)
-                lineTo(1600f, 800f)
+                moveTo(0f, 700f)
+                lineTo(450f, 400f)
+                lineTo(900f, 620f)
+                lineTo(1300f, 350f)
+                lineTo(1600f, 700f)
                 close()
             }
             canvas.drawPath(path, paint)
 
-            // Foreground hills
-            paint.color = Color.rgb(20, 10, 35)
-            canvas.drawRect(0f, 800f, 1600f, 1200f, paint)
+            // Forest Foreground
+            paint.color = Color.rgb(28, 55, 40)
+            canvas.drawRect(0f, 700f, 1600f, 1200f, paint)
 
             FileOutputStream(imageFile).use { bmp.compress(Bitmap.CompressFormat.JPEG, 95, it) }
             bmp.recycle()
         }
         results.add(FileInspector.inspectFile(imageFile).copy(isSample = true))
 
-        // 2. Audio Tone (Stereo 44.1kHz WAV synth tone ~350KB)
-        val audioFile = File(sampleDir, "sample_synth_chime.wav")
+        // 2. Audio Ambience (Binaural Harmonic Tone WAV)
+        val audioFile = File(sampleDir, "sample_nature_tone.wav")
         if (!audioFile.exists() || audioFile.length() < 1000) {
-            generateSampleWav(audioFile, durationSec = 2.0, sampleRate = 44100)
+            generateSampleWav(audioFile, durationSec = 2.5, sampleRate = 44100)
         }
         results.add(FileInspector.inspectFile(audioFile).copy(isSample = true))
 
-        // 3. Sales Dataset CSV
-        val csvFile = File(sampleDir, "sample_sales_q3.csv")
+        // 3. Botanical Species Dataset CSV
+        val csvFile = File(sampleDir, "sample_botanical_catalog.csv")
         if (!csvFile.exists() || csvFile.length() < 100) {
             csvFile.writeText(buildSampleCsv())
         }
         results.add(FileInspector.inspectFile(csvFile).copy(isSample = true))
 
-        // 4. Config JSON
-        val jsonFile = File(sampleDir, "sample_app_manifest.json")
+        // 4. Ecosystem Config JSON
+        val jsonFile = File(sampleDir, "sample_ecosystem_manifest.json")
         if (!jsonFile.exists() || jsonFile.length() < 100) {
             jsonFile.writeText(buildSampleJson())
         }
         results.add(FileInspector.inspectFile(jsonFile).copy(isSample = true))
 
-        // 5. Tech Specification Markdown
-        val mdFile = File(sampleDir, "sample_architecture_spec.md")
+        // 5. Permaculture Guide Markdown
+        val mdFile = File(sampleDir, "sample_permaculture_guide.md")
         if (!mdFile.exists() || mdFile.length() < 100) {
             mdFile.writeText(buildSampleMarkdown())
         }
@@ -145,8 +144,8 @@ object SampleFilesGenerator {
             val buffer = ByteBuffer.allocate(numSamples * numChannels * 2).order(ByteOrder.LITTLE_ENDIAN)
             for (i in 0 until numSamples) {
                 val t = i.toDouble() / sampleRate
-                val freqL = 440.0 + 20.0 * sin(2.0 * Math.PI * 4.0 * t)
-                val freqR = 554.37 // C#5
+                val freqL = 432.0 // Natural healing A
+                val freqR = 528.0 // Solfeggio C
                 val env = (1.0 - (t / durationSec)).coerceAtLeast(0.0)
                 val sampleL = (sin(2.0 * Math.PI * freqL * t) * 16000.0 * env).toInt().toShort()
                 val sampleR = (sin(2.0 * Math.PI * freqR * t) * 16000.0 * env).toInt().toShort()
@@ -159,18 +158,21 @@ object SampleFilesGenerator {
 
     private fun buildSampleCsv(): String {
         val sb = StringBuilder()
-        sb.append("id,transaction_code,region,product_category,units_sold,unit_price,revenue,satisfaction_rating\n")
-        val categories = listOf("Quantum Chip", "Neural Engine", "Optical Sensor", "Graphene Battery", "Cryo Cooler")
-        val regions = listOf("North America", "Europe", "Asia Pacific", "Latin America")
+        sb.append("id,botanical_name,common_name,climate_zone,canopy_layer,soil_ph_optimum,moisture_demand\n")
+        val flora = listOf(
+            Triple("Quercus alba", "White Oak", "Temperate"),
+            Triple("Acer saccharum", "Sugar Maple", "Boreal"),
+            Triple("Lavandula angustifolia", "English Lavender", "Mediterranean"),
+            Triple("Salvia rosmarinus", "Rosemary", "Arid"),
+            Triple("Monstera deliciosa", "Swiss Cheese Plant", "Tropical Rainforest")
+        )
 
         for (i in 1..80) {
-            val cat = categories[i % categories.size]
-            val reg = regions[i % regions.size]
-            val units = (i * 13) % 250 + 10
-            val price = (i * 37) % 800 + 49.99
-            val revenue = units * price
-            val score = 4.0 + ((i % 10) / 10.0)
-            sb.append(String.format(java.util.Locale.US, "%d,TXN-%05d,%s,%s,%d,%.2f,%.2f,%.1f\n", i, 10000 + i, reg, cat, units, price, revenue, score))
+            val item = flora[i % flora.size]
+            val layer = if (i % 3 == 0) "Overstory" else if (i % 3 == 1) "Understory" else "Herbaceous"
+            val ph = 5.5 + ((i % 25) / 10.0)
+            val moisture = if (i % 2 == 0) "Moderate" else "High"
+            sb.append(String.format(java.util.Locale.US, "%d,%s,%s,%s,%s,%.1f,%s\n", i, item.first, item.second, item.third, layer, ph, moisture))
         }
         return sb.toString()
     }
@@ -178,38 +180,28 @@ object SampleFilesGenerator {
     private fun buildSampleJson(): String {
         return """
         {
-          "system": {
-            "name": "OmniEngine",
-            "version": "4.2.0",
-            "cluster_nodes": 12,
-            "compression_acceleration": "NEON_VFPV4",
-            "memory_limit_mb": 4096
+          "ecosystem": {
+            "name": "OmniForest Sanctuary",
+            "biome": "Temperate Evergreen & Meadow",
+            "biodiversity_index": 0.94,
+            "soil_organic_matter_pct": 14.8,
+            "canopy_coverage_pct": 78
           },
-          "pipelines": [
+          "flora_layers": [
             {
-              "id": "pipe_image_ultra",
-              "codec": "WEBP_LOSSY_V2",
-              "quality_range": [10, 95],
-              "downscale_enabled": true,
-              "color_space": "BT2020"
+              "layer": "Emergent & Canopy",
+              "keystone_species": ["Quercus robur", "Pinus sylvestris"],
+              "carbon_sequestration_tons_yr": 124.5
             },
             {
-              "id": "pipe_audio_aac",
-              "sample_rate": 48000,
-              "channels": 2,
-              "bitrates": [32, 64, 96, 128, 192, 256]
-            },
-            {
-              "id": "pipe_deflate_extreme",
-              "algorithm": "DEFLATE_L9",
-              "window_bits": 15,
-              "memory_level": 9
+              "layer": "Shrub & Herbaceous",
+              "keystone_species": ["Vaccinium myrtillus", "Dryopteris filix-mas"],
+              "pollinator_support_rating": "Exceptional"
             }
           ],
-          "performance_benchmarks": {
-            "throughput_mb_sec": 64.8,
-            "latency_ms": 12.4,
-            "entropy_efficiency": 0.94
+          "local_processing": {
+            "zero_cloud_footprint": true,
+            "energy_efficiency_multiplier": 4.2
           }
         }
         """.trimIndent()
@@ -217,23 +209,21 @@ object SampleFilesGenerator {
 
     private fun buildSampleMarkdown(): String {
         return """
-        # OmniFile Engine Architecture Specification
+        # Permaculture & Regenerative Design Guide
         
-        ## 1. Universal Processing Model
-        OmniFile processes all file types locally on the device using memory-mapped zero-copy streaming buffers.
+        ## 1. Principles of Natural Systems
+        Working with local biological and thermodynamic patterns rather than forced unnatural resistance.
         
-        ### Key Subsystems:
-        - **Adaptive Quality Targeter**: Binary search heuristic across continuous compression domains.
-        - **Polyglot Transcoder**: Cross-encoding across Raster, Vector, Audio PCM, Document, and Binary formats.
-        - **Deflate L9 Accelerator**: Maximum information entropy reduction with multi-part packaging.
+        ### Core Tenets:
+        - **Catch and Store Energy**: Passive harvesting of solar and organic matter.
+        - **Produce No Waste**: Every output becomes the nutrient input for the next cycle.
+        - **Integrate Rather than Segregate**: High density companion guilds creating resilience.
         
-        ## 2. Performance Characteristics
-        - **Local Execution**: 100% offline, zero network latency, zero cloud upload limits.
-        - **Throughput**: 40-80 MB/s sustained streaming throughput.
-        - **Memory Footprint**: Strict 32KB-64KB circular buffer paging to prevent out-of-memory errors on large multi-megabyte payloads.
+        ## 2. Soil Micro-Biome & Fungal Networks
+        Mycelial mycorrhizal networks share trace minerals, nitrogen, and moisture across diverse canopy layers.
         
-        ## 3. Supported Target Dimensions
-        All standard MIME groups: Image, Video frame, Audio PCM/AAC, Document PDF, CSV, JSON, XML, Markdown, Base64, and Hex.
+        ## 3. Local Offline Computing
+        100% on-device processing minimizes datacenter heat and transmission footprints, delivering instantaneous privacy and longevity.
         """.trimIndent()
     }
 }

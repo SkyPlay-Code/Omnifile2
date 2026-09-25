@@ -14,10 +14,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Compress
-import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.OfflineBolt
+import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -93,12 +92,12 @@ fun OmniFileApp(
                         Box(
                             modifier = Modifier
                                 .size(28.dp)
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.primary),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.ElectricBolt,
+                                imageVector = Icons.Default.Spa,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier.size(18.dp)
@@ -108,8 +107,8 @@ fun OmniFileApp(
                         Text(
                             text = "OmniFile",
                             style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = (-0.5).sp
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = (-0.3).sp
                             )
                         )
                         Spacer(modifier = Modifier.width(8.dp))

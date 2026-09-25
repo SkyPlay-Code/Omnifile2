@@ -2,49 +2,53 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Tech Sleek & Precision Palette
-val CyanPrimaryDark = Color(0xFF38BDF8)
-val CyanOnPrimaryDark = Color(0xFF00354E)
-val CyanPrimaryContainerDark = Color(0xFF004D70)
-val CyanOnPrimaryContainerDark = Color(0xFFC2E8FF)
+// --- Organic Earthy & Botanical Palette ---
 
-val IndigoSecondaryDark = Color(0xFF818CF8)
-val IndigoOnSecondaryDark = Color(0xFF1E1B4B)
-val IndigoSecondaryContainerDark = Color(0xFF312E81)
-val IndigoOnSecondaryContainerDark = Color(0xFFE0E7FF)
+// Dark Mode - Deep Forest Moss & Warm Clay
+val SagePrimaryDark = Color(0xFF7EBA94)
+val SageOnPrimaryDark = Color(0xFF09371E)
+val SagePrimaryContainerDark = Color(0xFF1F4E33)
+val SageOnPrimaryContainerDark = Color(0xFFD2EEDC)
 
-val AmberTertiaryDark = Color(0xFFFBBF24)
-val AmberOnTertiaryDark = Color(0xFF451A03)
+val TerracottaSecondaryDark = Color(0xFFE28B62)
+val TerracottaOnSecondaryDark = Color(0xFF451E0C)
+val TerracottaSecondaryContainerDark = Color(0xFF643018)
+val TerracottaOnSecondaryContainerDark = Color(0xFFFFDBCF)
 
-val SlateBackgroundDark = Color(0xFF090D16)
-val SlateOnBackgroundDark = Color(0xFFE2E8F0)
-val SlateSurfaceDark = Color(0xFF0F172A)
-val SlateOnSurfaceDark = Color(0xFFF1F5F9)
-val SlateSurfaceVariantDark = Color(0xFF1E293B)
-val SlateOnSurfaceVariantDark = Color(0xFF94A3B8)
-val SlateOutlineDark = Color(0xFF334155)
+val OliveTertiaryDark = Color(0xFFB8CA87)
+val OliveOnTertiaryDark = Color(0xFF283500)
 
-// Light Palette
-val CyanPrimaryLight = Color(0xFF0284C7)
-val CyanOnPrimaryLight = Color(0xFFFFFFFF)
-val CyanPrimaryContainerLight = Color(0xFFE0F2FE)
-val CyanOnPrimaryContainerLight = Color(0xFF0369A1)
+val OrganicBackgroundDark = Color(0xFF131915)
+val OrganicOnBackgroundDark = Color(0xFFE2EBE4)
+val OrganicSurfaceDark = Color(0xFF1A221C)
+val OrganicOnSurfaceDark = Color(0xFFEEF5EF)
+val OrganicSurfaceVariantDark = Color(0xFF253128)
+val OrganicOnSurfaceVariantDark = Color(0xFFA5B4A8)
+val OrganicOutlineDark = Color(0xFF3B4D3F)
 
-val IndigoSecondaryLight = Color(0xFF4F46E5)
-val IndigoOnSecondaryLight = Color(0xFFFFFFFF)
-val IndigoSecondaryContainerLight = Color(0xFFEEF2FF)
-val IndigoOnSecondaryContainerLight = Color(0xFF3730A3)
+// Light Mode - Warm Linen, Forest Sage & Terracotta
+val SagePrimaryLight = Color(0xFF265C3B)
+val SageOnPrimaryLight = Color(0xFFFFFFFF)
+val SagePrimaryContainerLight = Color(0xFFD3EEDD)
+val SageOnPrimaryContainerLight = Color(0xFF07381D)
 
-val AmberTertiaryLight = Color(0xFFD97706)
-val AmberOnTertiaryLight = Color(0xFFFFFFFF)
+val TerracottaSecondaryLight = Color(0xFFA85128)
+val TerracottaOnSecondaryLight = Color(0xFFFFFFFF)
+val TerracottaSecondaryContainerLight = Color(0xFFFFDBCF)
+val TerracottaOnSecondaryContainerLight = Color(0xFF381404)
 
-val SlateBackgroundLight = Color(0xFFF8FAFC)
-val SlateOnBackgroundLight = Color(0xFF0F172A)
-val SlateSurfaceLight = Color(0xFFFFFFFF)
-val SlateOnSurfaceLight = Color(0xFF0F172A)
-val SlateSurfaceVariantLight = Color(0xFFF1F5F9)
-val SlateOnSurfaceVariantLight = Color(0xFF475569)
-val SlateOutlineLight = Color(0xFFCBD5E1)
+val OliveTertiaryLight = Color(0xFF566527)
+val OliveOnTertiaryLight = Color(0xFFFFFFFF)
 
-val EmeraldSuccess = Color(0xFF10B981)
-val RoseError = Color(0xFFF43F5E)
+val OrganicBackgroundLight = Color(0xFFF7F5F0)
+val OrganicOnBackgroundLight = Color(0xFF1A211C)
+val OrganicSurfaceLight = Color(0xFFFFFFFF)
+val OrganicOnSurfaceLight = Color(0xFF1A211C)
+val OrganicSurfaceVariantLight = Color(0xFFE9E5DD)
+val OrganicOnSurfaceVariantLight = Color(0xFF4B564E)
+val OrganicOutlineLight = Color(0xFFC7C2B8)
+
+val EmeraldSuccess = Color(0xFF2E8B57)
+val WarmClayWarning = Color(0xFFD97D38)
+val TerracottaError = Color(0xFFBA382A)
+val RoseError = TerracottaError

@@ -14,20 +14,21 @@
                 android:endX="108"
                 android:endY="108"
                 android:type="linear">
-                <item android:offset="0.0" android:color="#0F172A" />
-                <item android:offset="1.0" android:color="#1E1B4B" />
+                <item android:offset="0.0" android:color="#142B1F" />
+                <item android:offset="0.5" android:color="#1D402F" />
+                <item android:offset="1.0" android:color="#2A5840" />
             </gradient>
         </aapt:attr>
     </path>
-    <!-- Subtle tech grid -->
+    <!-- Organic botanical contours -->
     <path
         android:fillColor="#00000000"
-        android:strokeColor="#1E3860AA"
-        android:strokeWidth="1"
-        android:pathData="M24,24 L84,24 L84,84 L24,84 Z" />
+        android:strokeColor="#18FFFFFF"
+        android:strokeWidth="1.2"
+        android:pathData="M18,90 C34,65 55,75 90,18" />
     <path
         android:fillColor="#00000000"
-        android:strokeColor="#12FFFFFF"
-        android:strokeWidth="0.8"
-        android:pathData="M54,16 L54,92 M16,54 L92,54" />
+        android:strokeColor="#0EFFFFFF"
+        android:strokeWidth="1.2"
+        android:pathData="M18,70 C40,50 60,60 90,38" />
 </vector>
