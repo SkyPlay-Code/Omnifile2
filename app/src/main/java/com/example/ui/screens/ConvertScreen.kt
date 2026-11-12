@@ -5,6 +5,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,36 +26,47 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ElectricBolt
-import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Tab
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -64,10 +80,8 @@ import com.example.model.SupportedFormats
 import com.example.model.TargetFormat
 import com.example.ui.MainViewModel
 import com.example.ui.components.BatchJobResultCard
-import com.example.ui.components.FileDetailsCard
 import com.example.ui.components.JobResultCard
 import com.example.ui.components.MetadataPreferenceCard
-import com.example.ui.components.getCategoryIcon
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -87,31 +101,22 @@ fun ConvertScreen(
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    // Multiple Document picker launcher
-    val multipleFilesPicker = rememberLauncherForActivityResult(
+    val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            viewModel.selectUris(uris)
-        }
+        if (uris.isNotEmpty()) viewModel.selectUris(uris)
     }
 
-    // Append more files launcher
-    val addMoreFilesPicker = rememberLauncherForActivityResult(
+    val addMorePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            viewModel.addUris(uris)
-        }
+        if (uris.isNotEmpty()) viewModel.addUris(uris)
     }
 
-    // Photo/Video picker launcher for multiple items
-    val visualMediaPicker = rememberLauncherForActivityResult(
+    val visualPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            viewModel.selectUris(uris)
-        }
+        if (uris.isNotEmpty()) viewModel.selectUris(uris)
     }
 
     val categories = remember {
@@ -127,111 +132,229 @@ fun ConvertScreen(
     }
 
     var selectedCategoryIndex by remember { mutableIntStateOf(0) }
+    var showAdvancedSettings by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Hero Header
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-            )
-        ) {
-            Row(
+        // =========================================================================
+        // 1. FILE PICKER CARD (Clean Hero when empty, Compact Pill Tray when active)
+        // =========================================================================
+        if (selectedFiles.isEmpty()) {
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable { filePicker.launch(arrayOf("*/*")) },
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                )
             ) {
-                Box(
+                Column(
                     modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.primary),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Sync,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.FileOpen,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Universal Converter",
+                        text = "Choose Files to Convert",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Batch convert any files to any format locally on device",
+                        text = "Images, Audio, Docs, Archives & Code",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { filePicker.launch(arrayOf("*/*")) },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Icon(Icons.Default.InsertDriveFile, null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Documents", fontSize = 13.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                visualPicker.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                                )
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.PhotoLibrary, null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Media", fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        } else {
+            // COMPACT FILE TRAY (Takes minimal space, looks organized)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "${selectedFiles.size} FILES",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Total: ${FileDetails.formatBytes(selectedFiles.sumOf { it.size })}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Row {
+                            IconButton(onClick = { addMorePicker.launch(arrayOf("*/*")) }) {
+                                Icon(Icons.Default.Add, "Add Files", tint = MaterialTheme.colorScheme.primary)
+                            }
+                            IconButton(onClick = { viewModel.clearSelection() }) {
+                                Icon(Icons.Default.Close, "Clear", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Scrollable File Preview Chips
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(selectedFiles.size) { index ->
+                            val file = selectedFiles[index]
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Description,
+                                        null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = file.name,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.width(140.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        Icons.Default.Close,
+                                        "Remove",
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .clickable { viewModel.removeFile(file) },
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // File Details / Batch Queue Card
-        FileDetailsCard(
-            files = selectedFiles,
-            onPickFilesClick = { multipleFilesPicker.launch(arrayOf("*/*")) },
-            onPickPhotosClick = { visualMediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
-            onAddMoreFilesClick = { addMoreFilesPicker.launch(arrayOf("*/*")) },
-            onRemoveFile = { viewModel.removeFile(it) },
-            onClearClick = { viewModel.clearSelection() },
-            sampleFiles = sampleFiles,
-            onSelectSample = { viewModel.selectSampleFile(it) }
-        )
-
-        // Target Format Selector (Only visible if at least 1 file is selected)
+        // =========================================================================
+        // 2. TARGET FORMAT SELECTOR (Visible once files are chosen)
+        // =========================================================================
         if (selectedFiles.isNotEmpty()) {
             val primaryFile = selectedFiles.first()
 
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "TARGET FORMAT FOR BATCH",
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+                    text = "TARGET FORMAT",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    ),
                     color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                ScrollableTabRow(
-                    selectedTabIndex = selectedCategoryIndex,
-                    edgePadding = 0.dp,
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                // Category Chips (Horizontal Scroll)
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    categories.forEachIndexed { index, title ->
-                        Tab(
+                    itemsIndexed(categories) { index, title ->
+                        FilterChip(
                             selected = selectedCategoryIndex == index,
                             onClick = { selectedCategoryIndex = index },
-                            text = {
-                                Text(
-                                    text = title,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (selectedCategoryIndex == index) FontWeight.Bold else FontWeight.Normal
-                                )
-                            }
+                            label = { Text(title, fontSize = 12.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                            )
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Formats for selected category
                 val visibleFormats = when (selectedCategoryIndex) {
                     0 -> {
                         val recommended = SupportedFormats.getRecommendedFor(primaryFile.category, primaryFile.extension)
-                        if (recommended.isNotEmpty()) recommended else SupportedFormats.ALL_TARGETS.take(6)
+                        if (recommended.isNotEmpty()) recommended else SupportedFormats.ALL_TARGETS.take(8)
                     }
                     1 -> SupportedFormats.ALL_TARGETS.filter { it.category == FileCategory.IMAGE }
                     2 -> SupportedFormats.ALL_TARGETS.filter { it.category == FileCategory.DOCUMENT }
@@ -241,6 +364,7 @@ fun ConvertScreen(
                     else -> SupportedFormats.ALL_TARGETS.filter { it.category == FileCategory.RAW_BINARY }
                 }
 
+                // Sleek, Compact Format Chips Grid
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -250,18 +374,18 @@ fun ConvertScreen(
                         val isSelected = targetFormat.id == format.id
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .border(
                                     width = if (isSelected) 2.dp else 1.dp,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                                    shape = RoundedCornerShape(10.dp)
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(12.dp)
                                 )
                                 .background(
                                     if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                    else MaterialTheme.colorScheme.surface
                                 )
                                 .clickable { viewModel.setTargetFormat(format) }
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (isSelected) {
@@ -276,15 +400,15 @@ fun ConvertScreen(
                                 Column {
                                     Text(
                                         text = format.label,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium),
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                                        ),
                                         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = ".${format.extension} • ${format.description}",
+                                        text = ".${format.extension}",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -293,69 +417,123 @@ fun ConvertScreen(
                 }
             }
 
-            // Metadata Preferences
-            MetadataPreferenceCard(
-                config = metadataConfig,
-                onConfigChange = { viewModel.setMetadataConfig(it) }
-            )
-
-            // Convert Button / Progress
-            Spacer(modifier = Modifier.height(4.dp))
-            if (isProcessing) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
+            // =========================================================================
+            // 3. COLLAPSIBLE ADVANCED SETTINGS (Keeps screen clean)
+            // =========================================================================
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize(),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showAdvancedSettings = !showAdvancedSettings },
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = progressStatus,
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "${(progress * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Tune,
+                                null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Advanced Options & Metadata",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Icon(
+                            imageVector = if (showAdvancedSettings) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LinearProgressIndicator(
-                        progress = { progress },
+
+                    AnimatedVisibility(
+                        visible = showAdvancedSettings,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Column(modifier = Modifier.padding(top = 10.dp)) {
+                            MetadataPreferenceCard(
+                                config = metadataConfig,
+                                onConfigChange = { viewModel.setMetadataConfig(it) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // =========================================================================
+            // 4. ACTION BUTTON / PROGRESS
+            // =========================================================================
+            if (isProcessing) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    )
+                ) {
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                    )
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = progressStatus,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "${(progress * 100).toInt()}%",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                        )
+                    }
                 }
             } else {
                 Button(
                     onClick = { viewModel.executeConversion() },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("convert_button"),
-                    shape = RoundedCornerShape(12.dp),
+                        .height(54.dp),
+                    shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary
                     )
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ElectricBolt,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Icon(Icons.Default.ElectricBolt, null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (selectedFiles.size > 1) {
@@ -369,7 +547,9 @@ fun ConvertScreen(
             }
         }
 
-        // Job Results
+        // =========================================================================
+        // 5. JOB RESULTS (Clean Card with Preview)
+        // =========================================================================
         if (batchSummary != null && batchSummary.results.size > 1) {
             BatchJobResultCard(
                 summary = batchSummary,
@@ -389,6 +569,6 @@ fun ConvertScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }

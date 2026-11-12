@@ -4,12 +4,14 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
 import com.example.data.ConversionRecord
 import com.example.data.ConversionRepository
+import com.example.engine.DownloadStorageHelper
 import com.example.engine.FileInspector
 import com.example.engine.SampleFilesGenerator
 import com.example.engine.UniversalCompressor
@@ -24,10 +26,13 @@ import com.example.model.QualityProfile
 import com.example.model.SupportedFormats
 import com.example.model.TargetFormat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,13 +42,23 @@ import java.util.ArrayList
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: ConversionRepository
+    private var activeJob: Job? = null
 
     init {
         val database = AppDatabase.getDatabase(application)
         repository = ConversionRepository(database.conversionDao())
     }
 
-    val historyRecords: StateFlow<List<ConversionRecord>> = repository.allRecords
+    // --- History & Stats Flows ---
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val historyRecords: StateFlow<List<ConversionRecord>> = _searchQuery
+        .flatMapLatest { query ->
+            if (query.isBlank()) repository.allRecords
+            else repository.searchRecords(query)
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val totalSavingsBytes: StateFlow<Long> = repository.totalBytesSaved
@@ -52,6 +67,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val totalOperationsCount: StateFlow<Int> = repository.totalCount
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    // --- UI Configuration State ---
     private val _metadataConfig = MutableStateFlow(MetadataConfig())
     val metadataConfig: StateFlow<MetadataConfig> = _metadataConfig.asStateFlow()
 
@@ -70,6 +86,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _compressionConfig = MutableStateFlow(CompressionConfig())
     val compressionConfig: StateFlow<CompressionConfig> = _compressionConfig.asStateFlow()
 
+    // --- Processing & Progress State ---
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
 
@@ -99,6 +116,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- File Selection Handlers ---
     fun selectUris(uris: List<Uri>) {
         if (uris.isEmpty()) return
         viewModelScope.launch {
@@ -110,7 +128,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _lastJobResult.value = null
             _batchSummary.value = null
 
-            // Recommend format based on the first file
             detailsList.firstOrNull()?.let { first ->
                 val recommended = SupportedFormats.getRecommendedFor(first.category, first.extension)
                 if (recommended.isNotEmpty()) {
@@ -151,9 +168,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun selectUri(uri: Uri) {
-        selectUris(listOf(uri))
-    }
+    fun selectUri(uri: Uri) = selectUris(listOf(uri))
 
     fun selectSampleFile(sample: FileDetails) {
         _selectedFiles.value = listOf(sample)
@@ -179,58 +194,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _batchSummary.value = null
     }
 
-    fun setTargetFormat(format: TargetFormat) {
-        _targetFormat.value = format
-    }
-
-    fun setCompressionMode(mode: CompressionMode) {
-        _compressionConfig.value = _compressionConfig.value.copy(mode = mode)
-    }
-
+    // --- Configuration Setters ---
+    fun setTargetFormat(format: TargetFormat) { _targetFormat.value = format }
+    fun setCompressionMode(mode: CompressionMode) { _compressionConfig.value = _compressionConfig.value.copy(mode = mode) }
     fun setTargetSizeBytes(bytes: Long) {
         _compressionConfig.value = _compressionConfig.value.copy(
             mode = CompressionMode.EXACT_TARGET_SIZE,
             targetSizeBytes = bytes
         )
     }
-
     fun setPercentageReduction(percent: Int) {
         _compressionConfig.value = _compressionConfig.value.copy(
             mode = CompressionMode.PERCENTAGE_REDUCTION,
             percentageReduction = percent
         )
     }
-
     fun setQualityProfile(profile: QualityProfile) {
         _compressionConfig.value = _compressionConfig.value.copy(
             mode = CompressionMode.QUALITY_PRESET,
             qualityProfile = profile
         )
     }
+    fun setMetadataConfig(config: MetadataConfig) { _metadataConfig.value = config }
+    fun setSearchQuery(query: String) { _searchQuery.value = query }
 
-    fun setMetadataConfig(config: MetadataConfig) {
-        _metadataConfig.value = config
+    fun showPreview(filePath: String) { _previewFilePath.value = filePath }
+    fun dismissPreview() { _previewFilePath.value = null }
+    fun openDownloadsFolder(context: Context) { DownloadStorageHelper.openDownloadsFolder(context) }
+
+    fun cancelActiveJob() {
+        activeJob?.cancel()
+        activeJob = null
+        _isProcessing.value = false
+        _progressStatus.value = "Operation cancelled by user"
     }
 
-    fun showPreview(filePath: String) {
-        _previewFilePath.value = filePath
-    }
-
-    fun dismissPreview() {
-        _previewFilePath.value = null
-    }
-
-    fun openDownloadsFolder(context: Context) {
-        com.example.engine.DownloadStorageHelper.openDownloadsFolder(context)
-    }
-
+    // --- Conversion Engine Execution ---
     fun executeConversion() {
         val files = _selectedFiles.value
-        if (files.isEmpty()) return
+        if (files.isEmpty() || _isProcessing.value) return
         val target = _targetFormat.value
         val metaConfig = _metadataConfig.value
 
-        viewModelScope.launch {
+        activeJob = viewModelScope.launch {
             _isProcessing.value = true
             _progress.value = 0.02f
             _progressStatus.value = "Starting conversion of ${files.size} file(s)..."
@@ -239,60 +245,75 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val batchStartTime = System.currentTimeMillis()
             val resultsList = mutableListOf<ConversionJobResult>()
+            val recordsToInsert = mutableListOf<ConversionRecord>()
 
-            for (i in files.indices) {
-                val file = files[i]
-                val baseProgress = i.toFloat() / files.size.toFloat()
+            try {
+                for (i in files.indices) {
+                    val file = files[i]
+                    val baseProgress = i.toFloat() / files.size.toFloat()
 
-                val result = UniversalConverter.convertFile(
-                    context = getApplication(),
-                    source = file,
-                    target = target,
-                    metadataConfig = metaConfig,
-                    onProgress = { p, status ->
-                        val overall = baseProgress + (p / files.size.toFloat())
-                        _progress.value = overall
-                        _progressStatus.value = "File ${i + 1}/${files.size} (${file.name}): $status"
-                    }
-                )
-
-                resultsList.add(result)
-
-                if (result.isSuccess) {
-                    repository.insert(
-                        ConversionRecord(
-                            inputFileName = result.inputName,
-                            inputFileSize = result.inputSizeBytes,
-                            outputFileName = result.outputName,
-                            outputFileSize = result.outputSizeBytes,
-                            fromFormat = file.extension.uppercase(),
-                            toFormat = target.extension.uppercase(),
-                            mode = "CONVERT",
-                            durationMs = result.durationMs,
-                            outputPath = result.outputPath
-                        )
+                    val result = UniversalConverter.convertFile(
+                        context = getApplication(),
+                        source = file,
+                        target = target,
+                        metadataConfig = metaConfig,
+                        onProgress = { p, status ->
+                            val overall = baseProgress + (p / files.size.toFloat())
+                            _progress.value = overall
+                            _progressStatus.value = "File ${i + 1}/${files.size} (${file.name}): $status"
+                        }
                     )
-                }
-            }
 
-            _lastJobResult.value = resultsList.lastOrNull()
-            _batchSummary.value = BatchJobSummary(
-                results = resultsList,
-                totalDurationMs = System.currentTimeMillis() - batchStartTime,
-                mode = "CONVERT"
-            )
-            _progress.value = 1.0f
-            _progressStatus.value = "Batch conversion complete! ${resultsList.count { it.isSuccess }}/${files.size} succeeded."
-            _isProcessing.value = false
+                    resultsList.add(result)
+
+                    if (result.isSuccess) {
+                        recordsToInsert.add(
+                            ConversionRecord(
+                                inputFileName = result.inputName,
+                                inputFileSize = result.inputSizeBytes,
+                                outputFileName = result.outputName,
+                                outputFileSize = result.outputSizeBytes,
+                                fromFormat = file.extension.uppercase(),
+                                toFormat = target.extension.uppercase(),
+                                mode = "CONVERT",
+                                durationMs = result.durationMs,
+                                outputPath = result.outputPath,
+                                metadataSummary = result.metadataPreservedSummary
+                            )
+                        )
+                    }
+                }
+
+                // Single Atomic Database Transaction for all records
+                if (recordsToInsert.isNotEmpty()) {
+                    repository.insertBatch(recordsToInsert)
+                }
+
+                _lastJobResult.value = resultsList.lastOrNull()
+                _batchSummary.value = BatchJobSummary(
+                    results = resultsList,
+                    totalDurationMs = System.currentTimeMillis() - batchStartTime,
+                    mode = "CONVERT"
+                )
+                _progress.value = 1.0f
+                _progressStatus.value = "Batch complete! ${resultsList.count { it.isSuccess }}/${files.size} succeeded."
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _progressStatus.value = "Error: ${e.localizedMessage ?: "Conversion halted"}"
+            } finally {
+                _isProcessing.value = false
+                activeJob = null
+            }
         }
     }
 
+    // --- Compression Engine Execution ---
     fun executeCompression() {
         val files = _selectedFiles.value
-        if (files.isEmpty()) return
+        if (files.isEmpty() || _isProcessing.value) return
         val config = _compressionConfig.value.copy(metadataConfig = _metadataConfig.value)
 
-        viewModelScope.launch {
+        activeJob = viewModelScope.launch {
             _isProcessing.value = true
             _progress.value = 0.02f
             _progressStatus.value = "Starting compression of ${files.size} file(s)..."
@@ -301,60 +322,79 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val batchStartTime = System.currentTimeMillis()
             val resultsList = mutableListOf<ConversionJobResult>()
+            val recordsToInsert = mutableListOf<ConversionRecord>()
 
-            for (i in files.indices) {
-                val file = files[i]
-                val baseProgress = i.toFloat() / files.size.toFloat()
+            try {
+                for (i in files.indices) {
+                    val file = files[i]
+                    val baseProgress = i.toFloat() / files.size.toFloat()
 
-                val result = UniversalCompressor.compressFile(
-                    context = getApplication(),
-                    source = file,
-                    config = config,
-                    onProgress = { p, status ->
-                        val overall = baseProgress + (p / files.size.toFloat())
-                        _progress.value = overall
-                        _progressStatus.value = "File ${i + 1}/${files.size} (${file.name}): $status"
-                    }
-                )
-
-                resultsList.add(result)
-
-                if (result.isSuccess) {
-                    repository.insert(
-                        ConversionRecord(
-                            inputFileName = result.inputName,
-                            inputFileSize = result.inputSizeBytes,
-                            outputFileName = result.outputName,
-                            outputFileSize = result.outputSizeBytes,
-                            fromFormat = file.extension.uppercase(),
-                            toFormat = file.extension.uppercase(),
-                            mode = "COMPRESS",
-                            durationMs = result.durationMs,
-                            outputPath = result.outputPath
-                        )
+                    val result = UniversalCompressor.compressFile(
+                        context = getApplication(),
+                        source = file,
+                        config = config,
+                        onProgress = { p, status ->
+                            val overall = baseProgress + (p / files.size.toFloat())
+                            _progress.value = overall
+                            _progressStatus.value = "File ${i + 1}/${files.size} (${file.name}): $status"
+                        }
                     )
-                }
-            }
 
-            _lastJobResult.value = resultsList.lastOrNull()
-            _batchSummary.value = BatchJobSummary(
-                results = resultsList,
-                totalDurationMs = System.currentTimeMillis() - batchStartTime,
-                mode = "COMPRESS"
-            )
-            _progress.value = 1.0f
-            _progressStatus.value = "Batch compression complete! ${resultsList.count { it.isSuccess }}/${files.size} succeeded."
-            _isProcessing.value = false
+                    resultsList.add(result)
+
+                    if (result.isSuccess) {
+                        recordsToInsert.add(
+                            ConversionRecord(
+                                inputFileName = result.inputName,
+                                inputFileSize = result.inputSizeBytes,
+                                outputFileName = result.outputName,
+                                outputFileSize = result.outputSizeBytes,
+                                fromFormat = file.extension.uppercase(),
+                                toFormat = file.extension.uppercase(),
+                                mode = "COMPRESS",
+                                durationMs = result.durationMs,
+                                outputPath = result.outputPath,
+                                metadataSummary = result.metadataPreservedSummary
+                            )
+                        )
+                    }
+                }
+
+                // Single Atomic Database Transaction
+                if (recordsToInsert.isNotEmpty()) {
+                    repository.insertBatch(recordsToInsert)
+                }
+
+                _lastJobResult.value = resultsList.lastOrNull()
+                _batchSummary.value = BatchJobSummary(
+                    results = resultsList,
+                    totalDurationMs = System.currentTimeMillis() - batchStartTime,
+                    mode = "COMPRESS"
+                )
+                _progress.value = 1.0f
+                _progressStatus.value = "Compression complete! ${resultsList.count { it.isSuccess }}/${files.size} succeeded."
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _progressStatus.value = "Error: ${e.localizedMessage ?: "Compression halted"}"
+            } finally {
+                _isProcessing.value = false
+                activeJob = null
+            }
         }
     }
 
+    // --- History Deletion Handlers ---
     fun deleteHistoryItem(record: ConversionRecord) {
         viewModelScope.launch {
             repository.delete(record)
-            try {
-                val f = File(record.outputPath)
-                if (f.exists()) f.delete()
-            } catch (_: Exception) {}
+            withContext(Dispatchers.IO) {
+                try {
+                    if (!record.outputPath.startsWith("content://")) {
+                        val f = File(record.outputPath)
+                        if (f.exists()) f.delete()
+                    }
+                } catch (_: Exception) {}
+            }
         }
     }
 
@@ -364,39 +404,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- Safe File Sharing & Opening (Scoped Storage Compatible) ---
+    private fun resolveShareableUri(context: Context, pathOrUri: String): Uri? {
+        if (pathOrUri.startsWith("content://")) {
+            return Uri.parse(pathOrUri)
+        }
+        val file = File(pathOrUri)
+        if (!file.exists()) return null
+        return try {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        } catch (_: Exception) {
+            Uri.fromFile(file)
+        }
+    }
+
+    private fun inferMimeType(filePath: String): String {
+        val ext = filePath.substringAfterLast('.', "").lowercase()
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+    }
+
     fun shareFile(context: Context, filePath: String) {
-        val file = File(filePath)
-        if (!file.exists()) return
+        val uri = resolveShareableUri(context, filePath) ?: return
+        val mime = inferMimeType(filePath)
         try {
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                file
-            )
             val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "*/*"
+                type = mime
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(Intent.createChooser(intent, "Share converted file"))
+            val chooser = Intent.createChooser(intent, "Share file").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
         } catch (_: Exception) {}
     }
 
     fun shareAllResults(context: Context, results: List<ConversionJobResult>) {
         val uris = ArrayList<Uri>()
         for (r in results) {
-            if (r.isSuccess) {
-                val f = File(r.outputPath)
-                if (f.exists()) {
-                    try {
-                        val u = FileProvider.getUriForFile(
-                            context,
-                            "${context.packageName}.fileprovider",
-                            f
-                        )
-                        uris.add(u)
-                    } catch (_: Exception) {}
-                }
+            if (r.isSuccess && r.outputPath.isNotEmpty()) {
+                resolveShareableUri(context, r.outputPath)?.let { uris.add(it) }
             }
         }
         if (uris.isEmpty()) return
@@ -406,21 +453,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(Intent.createChooser(intent, "Share all processed files (${uris.size})"))
+            val chooser = Intent.createChooser(intent, "Share all files (${uris.size})").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
         } catch (_: Exception) {}
     }
 
     fun openFile(context: Context, filePath: String) {
-        val file = File(filePath)
-        if (!file.exists()) return
+        val uri = resolveShareableUri(context, filePath) ?: return
+        val mime = inferMimeType(filePath)
         try {
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                file
-            )
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "*/*")
+                setDataAndType(uri, mime)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }

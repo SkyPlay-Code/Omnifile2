@@ -16,11 +16,12 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Transform
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -38,16 +39,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.components.FilePreviewDialog
 import com.example.ui.screens.BatchAndToolsScreen
 import com.example.ui.screens.CompressScreen
 import com.example.ui.screens.ConvertScreen
 import com.example.ui.screens.HistoryScreen
-import com.example.ui.theme.EmeraldSuccess
 
 sealed class NavigationTab(val route: String, val title: String, val icon: ImageVector) {
     object Convert : NavigationTab("convert", "Convert", Icons.Default.Sync)
@@ -63,10 +65,11 @@ fun OmniFileApp(
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf(NavigationTab.Convert, NavigationTab.Compress, NavigationTab.Tools, NavigationTab.History)
+    val tabs = remember {
+        listOf(NavigationTab.Convert, NavigationTab.Compress, NavigationTab.Tools, NavigationTab.History)
+    }
 
     val selectedFiles by viewModel.selectedFiles.collectAsStateWithLifecycle()
-    val selectedFile by viewModel.selectedFile.collectAsStateWithLifecycle()
     val targetFormat by viewModel.targetFormat.collectAsStateWithLifecycle()
     val compressionConfig by viewModel.compressionConfig.collectAsStateWithLifecycle()
     val isProcessing by viewModel.isProcessing.collectAsStateWithLifecycle()
@@ -80,7 +83,7 @@ fun OmniFileApp(
     val totalCount by viewModel.totalOperationsCount.collectAsStateWithLifecycle()
     val metadataConfig by viewModel.metadataConfig.collectAsStateWithLifecycle()
     val previewFilePath by viewModel.previewFilePath.collectAsStateWithLifecycle()
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -91,60 +94,60 @@ fun OmniFileApp(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
+                                .size(30.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.primary),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Spa,
+                                imageVector = Icons.Default.Transform,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = "OmniFile",
                             style = MaterialTheme.typography.titleLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = (-0.3).sp
-                            )
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.width(8.dp))
+                        // Cozy privacy badge
                         Surface(
-                            color = EmeraldSuccess.copy(alpha = 0.15f),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
                                     modifier = Modifier
                                         .size(6.dp)
                                         .clip(CircleShape)
-                                        .background(EmeraldSuccess)
+                                        .background(MaterialTheme.colorScheme.primary)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "100% LOCAL",
+                                    text = "LOCAL",
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                     fontSize = 9.sp,
-                                    color = EmeraldSuccess
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
                     }
                 },
                 actions = {
-                    androidx.compose.material3.IconButton(
-                        onClick = { viewModel.openDownloadsFolder(context) }
-                    ) {
+                    IconButton(onClick = { viewModel.openDownloadsFolder(context) }) {
                         Icon(
                             imageVector = Icons.Default.Folder,
-                            contentDescription = "Open Downloads Folder",
-                            tint = MaterialTheme.colorScheme.primary
+                            contentDescription = "Open Downloads",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 },
@@ -156,22 +159,24 @@ fun OmniFileApp(
         bottomBar = {
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp
+                tonalElevation = 6.dp
             ) {
                 tabs.forEachIndexed { index, tab ->
                     NavigationBarItem(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
-                        icon = {
-                            Icon(imageVector = tab.icon, contentDescription = tab.title)
-                        },
+                        icon = { Icon(imageVector = tab.icon, contentDescription = tab.title) },
                         label = {
-                            Text(text = tab.title, fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal)
+                            Text(
+                                text = tab.title,
+                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 12.sp
+                            )
                         },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.primary,
                             selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer
+                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                         ),
                         modifier = Modifier.testTag("nav_${tab.route}")
                     )
@@ -209,9 +214,7 @@ fun OmniFileApp(
                     batchSummary = batchSummary,
                     sampleFiles = sampleFiles
                 )
-                2 -> BatchAndToolsScreen(
-                    viewModel = viewModel
-                )
+                2 -> BatchAndToolsScreen(viewModel = viewModel)
                 3 -> HistoryScreen(
                     viewModel = viewModel,
                     records = historyRecords,
@@ -220,9 +223,8 @@ fun OmniFileApp(
                 )
             }
 
-            // Live In-App File Preview Dialog
             if (previewFilePath != null) {
-                com.example.ui.components.FilePreviewDialog(
+                FilePreviewDialog(
                     filePath = previewFilePath!!,
                     onDismiss = { viewModel.dismissPreview() },
                     onShare = { viewModel.shareFile(context, previewFilePath!!) }

@@ -133,4 +133,9 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
+  
+  // Hardware-accelerated Video Engine (JoshAtticus/Compressor architecture)
+  implementation("androidx.media3:media3-transformer:1.3.1")
+  implementation("androidx.media3:media3-effect:1.3.1")
+  implementation("androidx.media3:media3-common:1.3.1")
 }

@@ -4,6 +4,12 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,14 +26,24 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
-import androidx.compose.material.icons.filled.ElectricBolt
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -35,8 +51,10 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -51,6 +69,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -67,10 +86,8 @@ import com.example.model.MetadataConfig
 import com.example.model.QualityProfile
 import com.example.ui.MainViewModel
 import com.example.ui.components.BatchJobResultCard
-import com.example.ui.components.FileDetailsCard
 import com.example.ui.components.JobResultCard
 import com.example.ui.components.MetadataPreferenceCard
-import com.example.ui.theme.EmeraldSuccess
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -90,97 +107,212 @@ fun CompressScreen(
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    val multipleFilesPicker = rememberLauncherForActivityResult(
+    val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            viewModel.selectUris(uris)
-        }
+        if (uris.isNotEmpty()) viewModel.selectUris(uris)
     }
 
-    val addMoreFilesPicker = rememberLauncherForActivityResult(
+    val addMorePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            viewModel.addUris(uris)
-        }
+        if (uris.isNotEmpty()) viewModel.addUris(uris)
     }
 
-    val visualMediaPicker = rememberLauncherForActivityResult(
+    val visualPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            viewModel.selectUris(uris)
-        }
+        if (uris.isNotEmpty()) viewModel.selectUris(uris)
     }
 
     var customSizeInput by remember { mutableStateOf("500") }
     var customUnitMb by remember { mutableStateOf(false) } // false = KB, true = MB
+    var showAdvancedSettings by remember { mutableStateOf(false) }
+
+    val accentSavings = Color(0xFF10B981) // Crisp savings green
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Hero Header
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
-            )
-        ) {
-            Row(
+        // =========================================================================
+        // 1. FILE PICKER CARD (Empty Hero vs Compact Active Tray)
+        // =========================================================================
+        if (selectedFiles.isEmpty()) {
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable { filePicker.launch(arrayOf("*/*")) },
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                )
             ) {
-                Box(
+                Column(
                     modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.secondary),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Compress,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondary,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Compress,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Intelligent Size Compressor",
+                        text = "Choose Files to Compress",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Batch compress any files to your exact chosen size or ratio",
+                        text = "Shrink images, video, audio & PDF to your exact target",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { filePicker.launch(arrayOf("*/*")) },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Icon(Icons.Default.InsertDriveFile, null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Documents", fontSize = 13.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                visualPicker.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                                )
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.PhotoLibrary, null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Media", fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        } else {
+            // COMPACT FILE TRAY
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "${selectedFiles.size} QUEUED",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Total: ${FileDetails.formatBytes(selectedFiles.sumOf { it.size })}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Row {
+                            IconButton(onClick = { addMorePicker.launch(arrayOf("*/*")) }) {
+                                Icon(Icons.Default.Add, "Add Files", tint = MaterialTheme.colorScheme.primary)
+                            }
+                            IconButton(onClick = { viewModel.clearSelection() }) {
+                                Icon(Icons.Default.Close, "Clear", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(selectedFiles.size) { index ->
+                            val file = selectedFiles[index]
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Description,
+                                        null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = file.name,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.width(140.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        Icons.Default.Close,
+                                        "Remove",
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .clickable { viewModel.removeFile(file) },
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // File Details / Batch Queue Card
-        FileDetailsCard(
-            files = selectedFiles,
-            onPickFilesClick = { multipleFilesPicker.launch(arrayOf("*/*")) },
-            onPickPhotosClick = { visualMediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
-            onAddMoreFilesClick = { addMoreFilesPicker.launch(arrayOf("*/*")) },
-            onRemoveFile = { viewModel.removeFile(it) },
-            onClearClick = { viewModel.clearSelection() },
-            sampleFiles = sampleFiles,
-            onSelectSample = { viewModel.selectSampleFile(it) }
-        )
-
-        // Compression Settings (when at least 1 file selected)
+        // =========================================================================
+        // 2. COMPRESSION CONFIGURATION (Only when files selected)
+        // =========================================================================
         if (selectedFiles.isNotEmpty()) {
             val totalBatchBytes = selectedFiles.sumOf { it.size }
 
@@ -188,20 +320,20 @@ fun CompressScreen(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    containerColor = MaterialTheme.colorScheme.surface
                 ),
-                border = CardDefaults.outlinedCardBorder().copy(
-                    brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
                 )
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "TARGET PROPORTION & SIZE",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+                        text = "COMPRESSION TARGET",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        ),
                         color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.height(10.dp))
@@ -216,7 +348,7 @@ fun CompressScreen(
 
                     TabRow(
                         selectedTabIndex = selectedTabIndex,
-                        containerColor = MaterialTheme.colorScheme.surface,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                         contentColor = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clip(RoundedCornerShape(10.dp))
                     ) {
@@ -242,21 +374,12 @@ fun CompressScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    // Mode 0: EXACT TARGET SIZE
+                    // MODE 0: EXACT TARGET SIZE
                     if (compressionConfig.mode == CompressionMode.EXACT_TARGET_SIZE) {
-                        Text(
-                            text = "Target size per file:",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Quick target chips
                         val quickSizes = listOf(
                             Pair("100 KB", 100 * 1024L),
-                            Pair("300 KB", 300 * 1024L),
                             Pair("500 KB", 500 * 1024L),
                             Pair("1 MB", 1024 * 1024L),
                             Pair("2 MB", 2 * 1024 * 1024L),
@@ -266,7 +389,7 @@ fun CompressScreen(
 
                         FlowRow(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             quickSizes.forEach { (label, bytes) ->
@@ -274,16 +397,16 @@ fun CompressScreen(
                                 FilterChip(
                                     selected = isSelected,
                                     onClick = { viewModel.setTargetSizeBytes(bytes) },
-                                    label = { Text(text = label, fontSize = 11.sp) },
+                                    label = { Text(label, fontSize = 11.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
                                     )
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         // Custom Numeric Input
                         Row(
@@ -302,7 +425,7 @@ fun CompressScreen(
                                         if (bytes > 0) viewModel.setTargetSizeBytes(bytes)
                                     }
                                 },
-                                label = { Text("Custom Target Size") },
+                                label = { Text("Custom Size", fontSize = 12.sp) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier
                                     .weight(1f)
@@ -310,7 +433,6 @@ fun CompressScreen(
                                 singleLine = true
                             )
 
-                            // Unit toggle button
                             Surface(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
@@ -321,7 +443,7 @@ fun CompressScreen(
                                         val bytes = (num * multiplier).toLong()
                                         if (bytes > 0) viewModel.setTargetSizeBytes(bytes)
                                     }
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
                                     .padding(horizontal = 16.dp, vertical = 16.dp)
                             ) {
                                 Text(
@@ -333,7 +455,7 @@ fun CompressScreen(
                         }
                     }
 
-                    // Mode 1: PERCENTAGE REDUCTION
+                    // MODE 1: PERCENTAGE REDUCTION
                     if (compressionConfig.mode == CompressionMode.PERCENTAGE_REDUCTION) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -341,13 +463,16 @@ fun CompressScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Reduction Amount:",
-                                style = MaterialTheme.typography.labelMedium,
+                                text = "Target Reduction:",
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "${compressionConfig.percentageReduction}% smaller",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = EmeraldSuccess)
+                                text = "-${compressionConfig.percentageReduction}%",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = accentSavings
+                                )
                             )
                         }
 
@@ -368,13 +493,17 @@ fun CompressScreen(
                                 FilterChip(
                                     selected = compressionConfig.percentageReduction == pct,
                                     onClick = { viewModel.setPercentageReduction(pct) },
-                                    label = { Text(text = "-$pct%") }
+                                    label = { Text("-$pct%", fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                    )
                                 )
                             }
                         }
                     }
 
-                    // Mode 2: QUALITY PRESET
+                    // MODE 2: QUALITY PROFILE
                     if (compressionConfig.mode == CompressionMode.QUALITY_PRESET) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             QualityProfile.entries.forEach { profile ->
@@ -390,34 +519,45 @@ fun CompressScreen(
                                         )
                                         .background(
                                             if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                            else MaterialTheme.colorScheme.surface
+                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                                         )
                                         .clickable { viewModel.setQualityProfile(profile) }
                                         .padding(12.dp)
                                 ) {
-                                    Column {
-                                        Text(
-                                            text = profile.label,
-                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = profile.description,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (isSelected) {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                        }
+                                        Column {
+                                            Text(
+                                                text = profile.label,
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = profile.description,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
                     }
 
-                    // Live Estimated Output Projection Card
-                    Spacer(modifier = Modifier.height(16.dp))
+                    // LIVE BEFORE -> AFTER SAVINGS PROJECTION PILL
+                    Spacer(modifier = Modifier.height(14.dp))
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
                         val projectedTargetBytes = when (compressionConfig.mode) {
                             CompressionMode.EXACT_TARGET_SIZE -> compressionConfig.targetSizeBytes * selectedFiles.size
@@ -437,27 +577,40 @@ fun CompressScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(12.dp),
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
                                 Text(
-                                    text = if (selectedFiles.size > 1) "CURRENT BATCH" else "CURRENT",
+                                    text = "ORIGINAL",
                                     style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
                                     text = FileDetails.formatBytes(totalBatchBytes),
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                                 )
                             }
-                            Text(text = "➔", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                text = "➔",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.titleMedium
+                            )
                             Column(horizontalAlignment = Alignment.End) {
-                                Text(text = "TARGET PROJECTION", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(
-                                    text = "${FileDetails.formatBytes(projectedTargetBytes)} (~$estSavings% saved)",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = EmeraldSuccess)
+                                    text = "FORECAST (~$estSavings% saved)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    color = accentSavings
+                                )
+                                Text(
+                                    text = FileDetails.formatBytes(projectedTargetBytes),
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = accentSavings
+                                    )
                                 )
                             }
                         }
@@ -465,75 +618,130 @@ fun CompressScreen(
                 }
             }
 
-            // Metadata Preferences
-            MetadataPreferenceCard(
-                config = metadataConfig,
-                onConfigChange = { viewModel.setMetadataConfig(it) }
-            )
-
-            // Compress Action Button
-            Spacer(modifier = Modifier.height(4.dp))
-            if (isProcessing) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
+            // =========================================================================
+            // 3. COLLAPSIBLE ADVANCED SETTINGS (Metadata & EXIF)
+            // =========================================================================
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize(),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showAdvancedSettings = !showAdvancedSettings },
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = progressStatus,
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "${(progress * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Tune,
+                                null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Advanced Options & Privacy",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Icon(
+                            imageVector = if (showAdvancedSettings) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LinearProgressIndicator(
-                        progress = { progress },
+
+                    AnimatedVisibility(
+                        visible = showAdvancedSettings,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Column(modifier = Modifier.padding(top = 10.dp)) {
+                            MetadataPreferenceCard(
+                                config = metadataConfig,
+                                onConfigChange = { viewModel.setMetadataConfig(it) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // =========================================================================
+            // 4. ACTION BUTTON / PROGRESS
+            // =========================================================================
+            if (isProcessing) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    )
+                ) {
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                    )
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = progressStatus,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "${(progress * 100).toInt()}%",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                        )
+                    }
                 }
             } else {
                 Button(
                     onClick = { viewModel.executeCompression() },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
+                        .height(54.dp)
                         .testTag("compress_button"),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary
+                        containerColor = MaterialTheme.colorScheme.primary
                     )
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Compress,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Icon(Icons.Default.Compress, null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (selectedFiles.size > 1) {
-                            "Compress Batch (${selectedFiles.size} Files) to Target"
+                            "Compress Batch (${selectedFiles.size} Files)"
                         } else {
-                            "Compress to Target Size"
+                            "Compress to Target"
                         },
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
@@ -541,7 +749,9 @@ fun CompressScreen(
             }
         }
 
-        // Job Results
+        // =========================================================================
+        // 5. JOB RESULTS (Clean Card with Preview)
+        // =========================================================================
         if (batchSummary != null && batchSummary.results.size > 1) {
             BatchJobResultCard(
                 summary = batchSummary,
@@ -561,6 +771,6 @@ fun CompressScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
