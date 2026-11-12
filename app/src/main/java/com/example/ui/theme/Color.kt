@@ -2,6 +2,9 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
+// Success & Savings Accent (Used in Result Cards and Badges)
+val EmeraldSuccess = Color(0xFF10B981)
+
 // Cozy Amber Core Accent Colors
 val AmberPrimaryLight = Color(0xFFB45309)      // Rich Honey Amber
 val AmberPrimaryDark = Color(0xFFFBBF24)       // Warm Glowing Amber
