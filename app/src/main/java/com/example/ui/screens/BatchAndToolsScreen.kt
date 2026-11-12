@@ -1,17 +1,12 @@
 package com.example.ui.screens
 
 import android.content.Context
-import android.net.Uri
 import android.util.Base64
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,12 +24,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.MergeType
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UploadFile
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -42,6 +35,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -68,7 +62,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.engine.DownloadStorageHelper
@@ -97,7 +90,7 @@ fun BatchAndToolsScreen(
     val accentSuccess = Color(0xFF10B981)
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
-    val tabTitles = listOf("Bundle ZIP", "Splitter", "Join Chunks", "Data Matrix")
+    val tabTitles = remember { listOf("Bundle ZIP", "Splitter", "Join Chunks", "Data Matrix") }
 
     // Tool 0: Multi-File Zip State
     var selectedBatchDetails by remember { mutableStateOf<List<FileDetails>>(emptyList()) }
@@ -172,7 +165,7 @@ fun BatchAndToolsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Tab Selector
+        // Tab Selector with native for-loop
         ScrollableTabRow(
             selectedTabIndex = selectedTabIndex,
             edgePadding = 0.dp,
@@ -180,7 +173,8 @@ fun BatchAndToolsScreen(
             contentColor = MaterialTheme.colorScheme.primary,
             modifier = Modifier.clip(RoundedCornerShape(12.dp))
         ) {
-            tabTitles.forEachIndexed { idx, title ->
+            for (idx in tabTitles.indices) {
+                val title = tabTitles[idx]
                 val tabIcon = when (idx) {
                     0 -> Icons.Default.FolderZip
                     1 -> Icons.Default.CallSplit
@@ -203,9 +197,7 @@ fun BatchAndToolsScreen(
         }
 
         when (selectedTabIndex) {
-            // =========================================================================
-            // TAB 0: MULTI-FILE ZIP ARCHIVER
-            // =========================================================================
+            // TAB 0: BUNDLE ZIP
             0 -> {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -219,13 +211,6 @@ fun BatchAndToolsScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Bundle Files into ZIP", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                         }
-                        Text(
-                            text = "Package multiple documents, images, or media into a single high-compression ZIP.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-
                         Spacer(modifier = Modifier.height(14.dp))
 
                         Button(
@@ -254,11 +239,12 @@ fun BatchAndToolsScreen(
                             )
 
                             Spacer(modifier = Modifier.height(10.dp))
-
                             Text("Compression Level:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(modifier = Modifier.height(4.dp))
+
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf(Pair("Fast (1)", 1), Pair("Normal (5)", 5), Pair("Ultra L9 (9)", 9)).forEach { (lbl, lvl) ->
+                                val levels = listOf(Pair("Fast (1)", 1), Pair("Normal (5)", 5), Pair("Ultra L9 (9)", 9))
+                                for ((lbl, lvl) in levels) {
                                     FilterChip(
                                         selected = zipCompressionLevel == lvl,
                                         onClick = { zipCompressionLevel = lvl },
@@ -274,7 +260,10 @@ fun BatchAndToolsScreen(
                             Spacer(modifier = Modifier.height(14.dp))
 
                             if (isZipping) {
-                                LinearProgressIndicator(progress = { zipProgress }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)))
+                                LinearProgressIndicator(
+                                    progress = zipProgress,
+                                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
+                                )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(batchZipStatus ?: "Compressing...", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                             } else {
@@ -333,9 +322,7 @@ fun BatchAndToolsScreen(
                 }
             }
 
-            // =========================================================================
-            // TAB 1: FILE SPLITTER
-            // =========================================================================
+            // TAB 1: SPLITTER
             1 -> {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -349,13 +336,6 @@ fun BatchAndToolsScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Split Large File", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                         }
-                        Text(
-                            text = "Divide huge files into equal byte-sized part chunks (.part001, .part002) for sharing.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-
                         Spacer(modifier = Modifier.height(14.dp))
 
                         if (splitterFile == null) {
@@ -400,11 +380,6 @@ fun BatchAndToolsScreen(
                                 singleLine = true
                             )
 
-                            val chunkBytes = ((splitChunkMb.toDoubleOrNull() ?: 1.0) * 1024 * 1024).toLong().coerceAtLeast(1024L)
-                            val estParts = (splitterFile!!.size / chunkBytes) + (if (splitterFile!!.size % chunkBytes != 0L) 1 else 0)
-
-                            Text("Generates ~$estParts parts (${splitChunkMb} MB each)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
-
                             Spacer(modifier = Modifier.height(14.dp))
 
                             Button(
@@ -412,6 +387,7 @@ fun BatchAndToolsScreen(
                                     scope.launch {
                                         isSplitting = true
                                         splitStatus = "Splitting into exact parts..."
+                                        val chunkBytes = ((splitChunkMb.toDoubleOrNull() ?: 1.0) * 1024 * 1024).toLong().coerceAtLeast(1024L)
                                         val parts = splitAndSaveFile(context, splitterFile!!, chunkBytes)
                                         lastSplitParts = parts
                                         isSplitting = false
@@ -442,7 +418,6 @@ fun BatchAndToolsScreen(
                                                     val details = withContext(Dispatchers.IO) {
                                                         lastSplitParts.mapNotNull { p ->
                                                             p.contentUri?.let { uri -> FileInspector.inspectUri(context, uri) }
-                                                                ?: File(p.absolutePath).takeIf { it.exists() }?.let { FileInspector.inspectFile(it) }
                                                         }
                                                     }
                                                     if (details.isNotEmpty()) {
@@ -468,9 +443,7 @@ fun BatchAndToolsScreen(
                 }
             }
 
-            // =========================================================================
-            // TAB 2: JOIN / REASSEMBLE PARTS
-            // =========================================================================
+            // TAB 2: JOIN CHUNKS
             2 -> {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -484,13 +457,6 @@ fun BatchAndToolsScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Reassemble Split Parts", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                         }
-                        Text(
-                            text = "Combine numbered chunks (.part001, .part002) back into the exact original file.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-
                         Spacer(modifier = Modifier.height(14.dp))
 
                         Button(
@@ -509,11 +475,9 @@ fun BatchAndToolsScreen(
                         if (joinDetails.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(12.dp))
                             val firstPartName = joinDetails.first().name
-                            val detectedOriginalName = remember(joinDetails) {
-                                if (customMergedName.isNotEmpty()) customMergedName
-                                else if (firstPartName.contains(".part")) firstPartName.substringBefore(".part")
-                                else "restored_file"
-                            }
+                            val detectedOriginalName = if (customMergedName.isNotEmpty()) customMergedName
+                            else if (firstPartName.contains(".part")) firstPartName.substringBefore(".part")
+                            else "restored_file"
 
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
@@ -580,9 +544,7 @@ fun BatchAndToolsScreen(
                 }
             }
 
-            // =========================================================================
-            // TAB 3: BASE64 & HEX MATRIX
-            // =========================================================================
+            // TAB 3: DATA MATRIX
             3 -> {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -596,13 +558,6 @@ fun BatchAndToolsScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Base64 & Hex Matrix", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                         }
-                        Text(
-                            text = "Encode and inspect raw string/binary payloads into Base64 or byte Hex dumps.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-
                         Spacer(modifier = Modifier.height(14.dp))
 
                         OutlinedTextField(
@@ -617,7 +572,7 @@ fun BatchAndToolsScreen(
 
                         val modes = listOf("Encode Base64", "Decode Base64", "Hex Dump", "Hex to Text")
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            modes.forEach { m ->
+                            for (m in modes) {
                                 FilterChip(
                                     selected = transformMode == m,
                                     onClick = {
@@ -677,7 +632,7 @@ fun BatchAndToolsScreen(
     }
 }
 
-// Multi-File ZIP Archiving Helper
+// Helpers
 suspend fun createAndSaveBatchZip(
     context: Context,
     files: List<FileDetails>,
@@ -691,7 +646,8 @@ suspend fun createAndSaveBatchZip(
         zos.setLevel(compressionLevel)
         val buf = ByteArray(32768)
 
-        files.forEachIndexed { idx, f ->
+        for (idx in files.indices) {
+            val f = files[idx]
             val p = (idx.toFloat() / files.size.toFloat())
             onProgress(p, "Compressing ${idx + 1}/${files.size}: ${f.name}...")
 
@@ -716,7 +672,6 @@ suspend fun createAndSaveBatchZip(
     )
 }
 
-// Split File and Save Directly to Downloads/OmniFile
 suspend fun splitAndSaveFile(
     context: Context,
     source: FileDetails,
@@ -776,7 +731,6 @@ fun extractPartIndex(fileName: String): Int {
     return 0
 }
 
-// Join / Reassemble Split Parts Back into Single Intact File
 suspend fun mergeAndSaveParts(
     context: Context,
     parts: List<FileDetails>,
@@ -788,7 +742,7 @@ suspend fun mergeAndSaveParts(
     val sortedParts = parts.sortedWith(compareBy({ extractPartIndex(it.name) }, { it.name }))
 
     FileOutputStream(tempMergedFile).use { outStream ->
-        sortedParts.forEach { part ->
+        for (part in sortedParts) {
             context.contentResolver.openInputStream(part.uri)?.use { inStream ->
                 var read: Int
                 while (inStream.read(buffer).also { read = it } != -1) {

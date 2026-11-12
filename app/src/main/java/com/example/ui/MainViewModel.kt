@@ -277,8 +277,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 toFormat = target.extension.uppercase(),
                                 mode = "CONVERT",
                                 durationMs = result.durationMs,
-                                outputPath = result.outputPath,
-                                metadataSummary = result.metadataPreservedSummary
+                                outputPath = result.outputPath ?: "",
+                                metadataSummary = result.metadataPreservedSummary ?: ""
                             )
                         )
                     }
@@ -353,8 +353,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 toFormat = file.extension.uppercase(),
                                 mode = "COMPRESS",
                                 durationMs = result.durationMs,
-                                outputPath = result.outputPath,
-                                metadataSummary = result.metadataPreservedSummary
+                                outputPath = result.outputPath ?: "",
+            					metadataSummary = result.metadataPreservedSummary ?: ""
                             )
                         )
                     }
@@ -423,9 +423,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
     }
 
-    fun shareFile(context: Context, filePath: String) {
+    fun shareFile(context: Context, filePath: String?) {
+    	val path = filePath ?: return
         val uri = resolveShareableUri(context, filePath) ?: return
-        val mime = inferMimeType(filePath)
+        val mime = inferMimeType(path)
         try {
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = mime
@@ -460,9 +461,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (_: Exception) {}
     }
 
-    fun openFile(context: Context, filePath: String) {
+    fun openFile(context: Context, filePath: String?) {
+    	val path = filePath ?: return
         val uri = resolveShareableUri(context, filePath) ?: return
-        val mime = inferMimeType(filePath)
+        val mime = inferMimeType(path)
         try {
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, mime)
