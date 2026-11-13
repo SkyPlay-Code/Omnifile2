@@ -178,6 +178,7 @@ class EngineSuiteTest {
             assertTrue("Failed converting PNG to $targetId: ${res.message}", res.isSuccess)
             if (targetId != "pdf") {
         		assertTrue("Output empty for $targetId", res.outputSizeBytes > 0)
+        	}
         }
     }
 
