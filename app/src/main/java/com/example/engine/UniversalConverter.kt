@@ -1084,14 +1084,17 @@ object UniversalConverter {
                 retriever.release()
             }
         } else if (target.category == FileCategory.AUDIO) {
-        	if (target.id == "wav") {
-        		onProgress(0.5f, "Decoding video audio track to PCM WAV...")
-        		decodeAudioToWav(context, source.uri, outputFile)
-        	} else {
-        		onProgress(0.5f, "Demuxing audio track from video stream...")
-        		extractAudioToM4a(context, source.uri, outputFile)
-        	}
+            if (target.id == "wav") {
+                onProgress(0.5f, "Decoding video audio track to PCM WAV...")
+                decodeAudioToWav(context, source.uri, outputFile)
+            } else {
+                onProgress(0.5f, "Demuxing audio track from video stream...")
+                extractAudioToM4a(context, source.uri, outputFile)
+            }
+        } else {
+            copyStream(context.contentResolver.openInputStream(source.uri)!!, outputFile.outputStream())
         }
+    }
 
     // --- Archive Converters ---
     private fun compressToZip(context: Context, source: FileDetails, outputFile: File) {
