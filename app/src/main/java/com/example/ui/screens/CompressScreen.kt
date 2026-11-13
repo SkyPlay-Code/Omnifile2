@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -34,16 +35,24 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.VideoSettings
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Compress
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -58,11 +67,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -77,17 +91,27 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.model.BatchJobSummary
 import com.example.model.CompressionConfig
 import com.example.model.CompressionMode
 import com.example.model.ConversionJobResult
+import com.example.model.FileCategory
 import com.example.model.FileDetails
 import com.example.model.MetadataConfig
 import com.example.model.QualityProfile
+import com.example.model.VideoCodec
+import com.example.model.VideoCompressionConfig
+import com.example.model.VideoPresetStore
+import com.example.model.VideoQualityPreset
+import com.example.model.VideoResolution
+import com.example.model.VideoTargetPreset
 import com.example.ui.MainViewModel
 import com.example.ui.components.BatchJobResultCard
 import com.example.ui.components.JobResultCard
 import com.example.ui.components.MetadataPreferenceCard
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -106,6 +130,7 @@ fun CompressScreen(
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    val videoConfig by viewModel.videoConfig.collectAsStateWithLifecycle()
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
@@ -126,10 +151,39 @@ fun CompressScreen(
     }
 
     var customSizeInput by remember { mutableStateOf("500") }
-    var customUnitMb by remember { mutableStateOf(false) } // false = KB, true = MB
+    var customUnitMb by remember { mutableStateOf(false) }
     var showAdvancedSettings by remember { mutableStateOf(false) }
 
-    val accentSavings = Color(0xFF10B981) // Crisp savings green
+    // Video Studio State
+    val isVideoSelected = selectedFiles.any { it.category == FileCategory.VIDEO }
+    var videoStudioTab by remember { mutableIntStateOf(0) } // 0=Presets, 1=Video, 2=Audio
+    var customPresets by remember { mutableStateOf(VideoPresetStore.loadPresets(context)) }
+    var showPresetEditor by remember { mutableStateOf(false) }
+    var videoDurationMs by remember { mutableLongStateOf(15_000L) }
+
+    // Inspect actual video duration for impossible-size prediction
+    LaunchedEffect(selectedFiles) {
+        val firstVideo = selectedFiles.firstOrNull { it.category == FileCategory.VIDEO }
+        if (firstVideo != null) {
+            videoDurationMs = withContext(Dispatchers.IO) {
+                val retriever = MediaMetadataRetriever()
+                var dur = 15_000L
+                try {
+                    context.contentResolver.openFileDescriptor(firstVideo.uri, "r")?.use { pfd ->
+                        retriever.setDataSource(pfd.fileDescriptor)
+                    } ?: retriever.setDataSource(context, firstVideo.uri)
+                    dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 15_000L
+                } catch (_: Exception) {
+                } finally {
+                    retriever.release()
+                }
+                dur
+            }
+        }
+    }
+
+    val accentSavings = Color(0xFF10B981)
+    val warningAmber = Color(0xFFF59E0B)
 
     Column(
         modifier = modifier
@@ -139,7 +193,7 @@ fun CompressScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // =========================================================================
-        // 1. FILE PICKER CARD (Empty Hero vs Compact Active Tray)
+        // 1. FILE PICKER CARD
         // =========================================================================
         if (selectedFiles.isEmpty()) {
             Card(
@@ -183,7 +237,7 @@ fun CompressScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Shrink images, video, audio & PDF to your exact target",
+                        text = "Video Studio, Perceptual Images, Audio & PDF",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -193,9 +247,7 @@ fun CompressScreen(
                         Button(
                             onClick = { filePicker.launch(arrayOf("*/*")) },
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary
-                            )
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
                             Icon(Icons.Default.InsertDriveFile, null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
@@ -279,12 +331,7 @@ fun CompressScreen(
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        Icons.Default.Description,
-                                        null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
+                                    Icon(Icons.Default.Description, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = file.name,
@@ -297,9 +344,7 @@ fun CompressScreen(
                                     Icon(
                                         Icons.Default.Close,
                                         "Remove",
-                                        modifier = Modifier
-                                            .size(14.dp)
-                                            .clickable { viewModel.removeFile(file) },
+                                        modifier = Modifier.size(14.dp).clickable { viewModel.removeFile(file) },
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -311,34 +356,437 @@ fun CompressScreen(
         }
 
         // =========================================================================
-        // 2. COMPRESSION CONFIGURATION (Only when files selected)
+        // 2A. 3-TAB VIDEO COMPRESSION STUDIO (JoshAtticus Style)
         // =========================================================================
-        if (selectedFiles.isNotEmpty()) {
+        if (selectedFiles.isNotEmpty() && isVideoSelected) {
+            val totalOrigBytes = selectedFiles.sumOf { it.size }
+            val durationSec = (videoDurationMs / 1000.0).coerceAtLeast(1.0)
+            val audioBps = if (videoConfig.removeAudio) 0.0 else videoConfig.audioBitrateKbps * 1000.0
+            val estTotalBps = (videoConfig.targetSizeBytes * 8.0) / durationSec
+            val estVideoKbps = ((estTotalBps - audioBps) / 1000.0).toInt()
+
+            val isImpossible = estVideoKbps < 140
+            val isLowQualityForRes = (videoConfig.resolution == VideoResolution.P1080 && estVideoKbps < 900) ||
+                (videoConfig.resolution == VideoResolution.P720 && estVideoKbps < 400)
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    // 3 Studio Tabs: Presets | Video | Audio
+                    val studioTabs = listOf("Presets", "Video", "Audio")
+                    TabRow(
+                        selectedTabIndex = videoStudioTab,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                    ) {
+                        for (idx in studioTabs.indices) {
+                            Tab(
+                                selected = videoStudioTab == idx,
+                                onClick = { videoStudioTab = idx },
+                                icon = {
+                                    val ic = when (idx) {
+                                        0 -> Icons.Default.Tune
+                                        1 -> Icons.Default.VideoSettings
+                                        else -> Icons.Default.Audiotrack
+                                    }
+                                    Icon(ic, null, modifier = Modifier.size(16.dp))
+                                },
+                                text = {
+                                    Text(
+                                        text = studioTabs[idx],
+                                        fontSize = 12.sp,
+                                        fontWeight = if (videoStudioTab == idx) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // -----------------------------------------------------------------
+                    // TAB A: PRESETS (Quality + Customizable Platform Target Sizes)
+                    // -----------------------------------------------------------------
+                    if (videoStudioTab == 0) {
+                        Text(
+                            text = "QUALITY PRESET",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for (qp in listOf(VideoQualityPreset.HIGH, VideoQualityPreset.MEDIUM, VideoQualityPreset.LOW)) {
+                                val selected = videoConfig.qualityPreset == qp
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .border(
+                                            width = if (selected) 2.dp else 1.dp,
+                                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(10.dp)
+                                        )
+                                        .background(
+                                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+                                        )
+                                        .clickable {
+                                            val newRes = when (qp) {
+                                                VideoQualityPreset.HIGH -> VideoResolution.ORIGINAL
+                                                VideoQualityPreset.MEDIUM -> VideoResolution.P1080
+                                                VideoQualityPreset.LOW -> VideoResolution.P720
+                                                VideoQualityPreset.CUSTOM -> videoConfig.resolution
+                                            }
+                                            viewModel.setVideoConfig(
+                                                videoConfig.copy(
+                                                    qualityPreset = qp,
+                                                    resolution = newRes,
+                                                    targetFps = qp.targetFps
+                                                )
+                                            )
+                                        }
+                                        .padding(12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = qp.label,
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = qp.subtitle,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        if (selected) {
+                                            Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "TARGET SIZE PRESETS",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            TextButton(onClick = { showPresetEditor = true }) {
+                                Icon(Icons.Default.Edit, null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Customize", fontSize = 11.sp)
+                            }
+                        }
+
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            for (preset in customPresets) {
+                                val selected = videoConfig.targetSizeBytes == preset.sizeBytes
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = {
+                                        viewModel.setVideoConfig(videoConfig.copy(targetSizeBytes = preset.sizeBytes))
+                                    },
+                                    label = {
+                                        Text("${preset.name} (${FileDetails.formatBytes(preset.sizeBytes)})", fontSize = 11.sp)
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // -----------------------------------------------------------------
+                    // TAB B: ADVANCED VIDEO (Slider, Codec, Resolution, FPS)
+                    // -----------------------------------------------------------------
+                    if (videoStudioTab == 1) {
+                        val maxSliderMb = (totalOrigBytes / (1024f * 1024f)).coerceAtLeast(10f)
+                        val currentMb = (videoConfig.targetSizeBytes / (1024f * 1024f)).coerceIn(1f, maxSliderMb)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Target File Size", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = FileDetails.formatBytes(videoConfig.targetSizeBytes),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        Slider(
+                            value = currentMb,
+                            onValueChange = { mb ->
+                                viewModel.setVideoConfig(
+                                    videoConfig.copy(
+                                        qualityPreset = VideoQualityPreset.CUSTOM,
+                                        targetSizeBytes = (mb.toLong() * 1024L * 1024L).coerceAtLeast(512 * 1024L)
+                                    )
+                                )
+                            },
+                            valueRange = 1f..maxSliderMb
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text("VIDEO ENCODING CODEC", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (codec in VideoCodec.entries) {
+                                val selected = videoConfig.codec == codec
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .border(
+                                            if (selected) 2.dp else 1.dp,
+                                            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface)
+                                        .clickable { viewModel.setVideoConfig(videoConfig.copy(codec = codec)) }
+                                        .padding(10.dp)
+                                ) {
+                                    Column {
+                                        Text(codec.label, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                                        Text(codec.description, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("RESOLUTION", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for (res in VideoResolution.entries) {
+                                FilterChip(
+                                    selected = videoConfig.resolution == res,
+                                    onClick = {
+                                        viewModel.setVideoConfig(
+                                            videoConfig.copy(qualityPreset = VideoQualityPreset.CUSTOM, resolution = res)
+                                        )
+                                    },
+                                    label = { Text(res.label, fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("FRAME RATE (FPS)", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            val fpsChoices = listOf(Pair("Original", 0f), Pair("60 FPS", 60f), Pair("30 FPS", 30f), Pair("24 FPS", 24f), Pair("15 FPS", 15f))
+                            for ((label, fps) in fpsChoices) {
+                                FilterChip(
+                                    selected = videoConfig.targetFps == fps,
+                                    onClick = {
+                                        viewModel.setVideoConfig(
+                                            videoConfig.copy(qualityPreset = VideoQualityPreset.CUSTOM, targetFps = fps)
+                                        )
+                                    },
+                                    label = { Text(label, fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // -----------------------------------------------------------------
+                    // TAB C: ADVANCED AUDIO (Remove, Bitrate, Volume Gain)
+                    // -----------------------------------------------------------------
+                    if (videoStudioTab == 2) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.VolumeOff, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text("Remove Audio Track", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                                    Text("Saves space by stripping audio completely", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            Switch(
+                                checked = videoConfig.removeAudio,
+                                onCheckedChange = { viewModel.setVideoConfig(videoConfig.copy(removeAudio = it)) }
+                            )
+                        }
+
+                        if (!videoConfig.removeAudio) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Text("AUDIO BITRATE", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                for (kbps in listOf(48, 64, 96, 128, 192)) {
+                                    FilterChip(
+                                        selected = videoConfig.audioBitrateKbps == kbps,
+                                        onClick = { viewModel.setVideoConfig(videoConfig.copy(audioBitrateKbps = kbps)) },
+                                        label = { Text("$kbps kbps", fontSize = 11.sp) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Audio Volume Gain", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    text = "${(videoConfig.audioVolume * 100).toInt()}%",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Slider(
+                                value = videoConfig.audioVolume,
+                                onValueChange = { viewModel.setVideoConfig(videoConfig.copy(audioVolume = it)) },
+                                valueRange = 0.25f..2.0f,
+                                steps = 6
+                            )
+                        }
+                    }
+
+                    // -----------------------------------------------------------------
+                    // IMPOSSIBLE SIZE WARNING & ONE-TAP SUGGESTIONS
+                    // -----------------------------------------------------------------
+                    if (isImpossible || isLowQualityForRes) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = warningAmber.copy(alpha = 0.14f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, warningAmber.copy(alpha = 0.4f))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Warning, null, tint = warningAmber, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isImpossible) "Target size too tight (~${estVideoKbps.coerceAtLeast(1)} kbps)"
+                                               else "Low bitrate for ${videoConfig.resolution.label} (~$estVideoKbps kbps)",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = warningAmber
+                                    )
+                                }
+                                Text(
+                                    text = "Suggestions to keep video watchable:",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                                )
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (videoConfig.resolution != VideoResolution.P480 && videoConfig.resolution != VideoResolution.P360) {
+                                        OutlinedButton(
+                                            onClick = { viewModel.setVideoConfig(videoConfig.copy(resolution = VideoResolution.P480, qualityPreset = VideoQualityPreset.CUSTOM)) },
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) { Text("Drop to 480p", fontSize = 11.sp) }
+                                    }
+                                    if (videoConfig.targetFps == 0f || videoConfig.targetFps > 24f) {
+                                        OutlinedButton(
+                                            onClick = { viewModel.setVideoConfig(videoConfig.copy(targetFps = 24f, qualityPreset = VideoQualityPreset.CUSTOM)) },
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) { Text("Cap 24 FPS", fontSize = 11.sp) }
+                                    }
+                                    if (videoConfig.codec != VideoCodec.H265) {
+                                        OutlinedButton(
+                                            onClick = { viewModel.setVideoConfig(videoConfig.copy(codec = VideoCodec.H265)) },
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) { Text("Use H.265", fontSize = 11.sp) }
+                                    }
+                                    if (!videoConfig.removeAudio) {
+                                        OutlinedButton(
+                                            onClick = { viewModel.setVideoConfig(videoConfig.copy(removeAudio = true)) },
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) { Text("Strip Audio", fontSize = 11.sp) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Forecast Summary Pill
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("ORIGINAL", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(FileDetails.formatBytes(totalOrigBytes), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+                            }
+                            Text("➔", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("${videoConfig.codec.label.substringBefore(" ")} • ${videoConfig.resolution.label}", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = accentSavings)
+                                Text(FileDetails.formatBytes(videoConfig.targetSizeBytes), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = accentSavings))
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (selectedFiles.isNotEmpty()) {
+            // =========================================================================
+            // 2B. STANDARD COMPRESSION CONFIG (Images, Audio, PDF, Code)
+            // =========================================================================
             val totalBatchBytes = selectedFiles.sumOf { it.size }
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
-                )
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "COMPRESSION TARGET",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        ),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
                         color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Mode Tabs
                     val modes = listOf("Exact Size", "Percentage", "Profile")
                     val selectedTabIndex = when (compressionConfig.mode) {
                         CompressionMode.EXACT_TARGET_SIZE -> 0
@@ -352,7 +800,7 @@ fun CompressScreen(
                         contentColor = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clip(RoundedCornerShape(10.dp))
                     ) {
-                        modes.forEachIndexed { idx, label ->
+                        for (idx in modes.indices) {
                             Tab(
                                 selected = selectedTabIndex == idx,
                                 onClick = {
@@ -363,27 +811,20 @@ fun CompressScreen(
                                     }
                                     viewModel.setCompressionMode(newMode)
                                 },
-                                text = {
-                                    Text(
-                                        text = label,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (selectedTabIndex == idx) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                }
+                                text = { Text(modes[idx], fontSize = 12.sp, fontWeight = if (selectedTabIndex == idx) FontWeight.Bold else FontWeight.Normal) }
                             )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // MODE 0: EXACT TARGET SIZE
                     if (compressionConfig.mode == CompressionMode.EXACT_TARGET_SIZE) {
                         val quickSizes = listOf(
                             Pair("100 KB", 100 * 1024L),
                             Pair("500 KB", 500 * 1024L),
                             Pair("1 MB", 1024 * 1024L),
                             Pair("2 MB", 2 * 1024 * 1024L),
-                            Pair("8 MB (Discord)", 8 * 1024 * 1024L),
+                            Pair("10 MB (GitHub)", 10 * 1024 * 1024L),
                             Pair("25 MB (Email)", 25 * 1024 * 1024L)
                         )
 
@@ -392,10 +833,9 @@ fun CompressScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            quickSizes.forEach { (label, bytes) ->
-                                val isSelected = compressionConfig.targetSizeBytes == bytes
+                            for ((label, bytes) in quickSizes) {
                                 FilterChip(
-                                    selected = isSelected,
+                                    selected = compressionConfig.targetSizeBytes == bytes,
                                     onClick = { viewModel.setTargetSizeBytes(bytes) },
                                     label = { Text(label, fontSize = 11.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
@@ -407,13 +847,7 @@ fun CompressScreen(
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
-
-                        // Custom Numeric Input
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = customSizeInput,
                                 onValueChange = { newVal ->
@@ -427,9 +861,7 @@ fun CompressScreen(
                                 },
                                 label = { Text("Custom Size", fontSize = 12.sp) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("custom_target_size_input"),
+                                modifier = Modifier.weight(1f).testTag("custom_target_size_input"),
                                 singleLine = true
                             )
 
@@ -446,34 +878,15 @@ fun CompressScreen(
                                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
                                     .padding(horizontal = 16.dp, vertical = 16.dp)
                             ) {
-                                Text(
-                                    text = if (customUnitMb) "MB" else "KB",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                Text(if (customUnitMb) "MB" else "KB", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
 
-                    // MODE 1: PERCENTAGE REDUCTION
                     if (compressionConfig.mode == CompressionMode.PERCENTAGE_REDUCTION) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Target Reduction:",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "-${compressionConfig.percentageReduction}%",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = accentSavings
-                                )
-                            )
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Target Reduction:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("-${compressionConfig.percentageReduction}%", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = accentSavings))
                         }
 
                         Slider(
@@ -484,12 +897,8 @@ fun CompressScreen(
                             modifier = Modifier.testTag("percentage_slider")
                         )
 
-                        val presets = listOf(25, 50, 75, 90)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            presets.forEach { pct ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            for (pct in listOf(25, 50, 75, 90)) {
                                 FilterChip(
                                     selected = compressionConfig.percentageReduction == pct,
                                     onClick = { viewModel.setPercentageReduction(pct) },
@@ -503,164 +912,59 @@ fun CompressScreen(
                         }
                     }
 
-                    // MODE 2: QUALITY PROFILE
                     if (compressionConfig.mode == CompressionMode.QUALITY_PRESET) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            QualityProfile.entries.forEach { profile ->
+                            for (profile in QualityProfile.entries) {
                                 val isSelected = compressionConfig.qualityProfile == profile
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(10.dp))
-                                        .border(
-                                            width = if (isSelected) 2.dp else 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                                            shape = RoundedCornerShape(10.dp)
-                                        )
-                                        .background(
-                                            if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                        )
+                                        .border(if (isSelected) 2.dp else 1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                                        .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                                         .clickable { viewModel.setQualityProfile(profile) }
                                         .padding(12.dp)
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         if (isSelected) {
-                                            Icon(
-                                                Icons.Default.Check,
-                                                null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(16.dp)
-                                            )
+                                            Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(8.dp))
                                         }
                                         Column {
-                                            Text(
-                                                text = profile.label,
-                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = profile.description,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                            Text(profile.label, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                                            Text(profile.description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
                                 }
                             }
                         }
                     }
-
-                    // LIVE BEFORE -> AFTER SAVINGS PROJECTION PILL
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    ) {
-                        val projectedTargetBytes = when (compressionConfig.mode) {
-                            CompressionMode.EXACT_TARGET_SIZE -> compressionConfig.targetSizeBytes * selectedFiles.size
-                            CompressionMode.PERCENTAGE_REDUCTION -> (totalBatchBytes * (100 - compressionConfig.percentageReduction) / 100.0).toLong()
-                            CompressionMode.QUALITY_PRESET -> when (compressionConfig.qualityProfile) {
-                                QualityProfile.ULTRA_COMPACT -> (totalBatchBytes * 0.25).toLong()
-                                QualityProfile.BALANCED -> (totalBatchBytes * 0.50).toLong()
-                                QualityProfile.HIGH_FIDELITY -> (totalBatchBytes * 0.75).toLong()
-                                QualityProfile.EXTREME_DEFLATE -> (totalBatchBytes * 0.60).toLong()
-                            }
-                        }
-                        val estSavings = if (totalBatchBytes > 0) {
-                            val diff = totalBatchBytes - projectedTargetBytes
-                            ((diff.toDouble() / totalBatchBytes.toDouble()) * 100).toInt().coerceIn(0, 99)
-                        } else 0
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(
-                                    text = "ORIGINAL",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = FileDetails.formatBytes(totalBatchBytes),
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                                )
-                            }
-                            Text(
-                                text = "➔",
-                                color = MaterialTheme.colorScheme.primary,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    text = "FORECAST (~$estSavings% saved)",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 10.sp,
-                                    color = accentSavings
-                                )
-                                Text(
-                                    text = FileDetails.formatBytes(projectedTargetBytes),
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = accentSavings
-                                    )
-                                )
-                            }
-                        }
-                    }
                 }
             }
+        }
 
-            // =========================================================================
-            // 3. COLLAPSIBLE ADVANCED SETTINGS (Metadata & EXIF)
-            // =========================================================================
+        // =========================================================================
+        // 3. COLLAPSIBLE METADATA OPTIONS & ACTION BUTTON
+        // =========================================================================
+        if (selectedFiles.isNotEmpty()) {
             Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .animateContentSize(),
+                modifier = Modifier.fillMaxWidth().animateContentSize(),
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
-                )
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showAdvancedSettings = !showAdvancedSettings },
+                        modifier = Modifier.fillMaxWidth().clickable { showAdvancedSettings = !showAdvancedSettings },
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Tune,
-                                null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Icon(Icons.Default.Tune, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Advanced Options & Privacy",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Text("Advanced Options & Privacy", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
                         }
-                        Icon(
-                            imageVector = if (showAdvancedSettings) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Icon(if (showAdvancedSettings) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
 
                     AnimatedVisibility(
@@ -669,80 +973,38 @@ fun CompressScreen(
                         exit = fadeOut() + shrinkVertically()
                     ) {
                         Column(modifier = Modifier.padding(top = 10.dp)) {
-                            MetadataPreferenceCard(
-                                config = metadataConfig,
-                                onConfigChange = { viewModel.setMetadataConfig(it) }
-                            )
+                            MetadataPreferenceCard(config = metadataConfig, onConfigChange = { viewModel.setMetadataConfig(it) })
                         }
                     }
                 }
             }
 
-            // =========================================================================
-            // 4. ACTION BUTTON / PROGRESS
-            // =========================================================================
             if (isProcessing) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                    )
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = progressStatus,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                text = "${(progress * 100).toInt()}%",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(progressStatus, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                         }
                         Spacer(modifier = Modifier.height(10.dp))
-                        LinearProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                        )
+                        LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)))
                     }
                 }
             } else {
                 Button(
                     onClick = { viewModel.executeCompression() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp)
-                        .testTag("compress_button"),
+                    modifier = Modifier.fillMaxWidth().height(54.dp).testTag("compress_button"),
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Icon(Icons.Default.Compress, null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (selectedFiles.size > 1) {
-                            "Compress Batch (${selectedFiles.size} Files)"
-                        } else {
-                            "Compress to Target"
-                        },
+                        text = if (selectedFiles.size > 1) "Compress Batch (${selectedFiles.size} Files)" else "Compress to Target",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                 }
@@ -750,7 +1012,7 @@ fun CompressScreen(
         }
 
         // =========================================================================
-        // 5. JOB RESULTS (Clean Card with Preview)
+        // 4. RESULTS
         // =========================================================================
         if (batchSummary != null && batchSummary.results.size > 1) {
             BatchJobResultCard(
@@ -772,5 +1034,97 @@ fun CompressScreen(
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+
+    // =========================================================================
+    // CUSTOM PRESET EDITOR DIALOG
+    // =========================================================================
+    if (showPresetEditor) {
+        var newName by remember { mutableStateOf("") }
+        var newMb by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showPresetEditor = false },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Customize Target Presets", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                    IconButton(onClick = {
+                        customPresets = VideoPresetStore.resetDefaults(context)
+                    }) {
+                        Icon(Icons.Default.Refresh, "Reset defaults")
+                    }
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = newName,
+                            onValueChange = { newName = it },
+                            label = { Text("Name", fontSize = 11.sp) },
+                            modifier = Modifier.weight(1.3f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = newMb,
+                            onValueChange = { newMb = it.filter { c -> c.isDigit() } },
+                            label = { Text("MB", fontSize = 11.sp) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(0.9f),
+                            singleLine = true
+                        )
+                        IconButton(onClick = {
+                            val mbVal = newMb.toLongOrNull() ?: 0L
+                            if (newName.isNotBlank() && mbVal > 0) {
+                                val updated = customPresets + VideoTargetPreset(
+                                    id = "custom_${System.currentTimeMillis()}",
+                                    name = newName.trim(),
+                                    sizeBytes = mbVal * 1024L * 1024L,
+                                    isDefault = false
+                                )
+                                customPresets = updated
+                                VideoPresetStore.savePresets(context, updated)
+                                newName = ""
+                                newMb = ""
+                            }
+                        }) {
+                            Icon(Icons.Default.Add, "Add", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier.height(220.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        for (p in customPresets) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("${p.name} • ${FileDetails.formatBytes(p.sizeBytes)}", style = MaterialTheme.typography.bodySmall)
+                                IconButton(
+                                    onClick = {
+                                        val updated = customPresets.filterNot { it.id == p.id }
+                                        customPresets = updated
+                                        VideoPresetStore.savePresets(context, updated)
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, "Delete", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPresetEditor = false }) { Text("Done") }
+            }
+        )
     }
 }

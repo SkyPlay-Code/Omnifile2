@@ -25,6 +25,7 @@ import com.example.model.MetadataConfig
 import com.example.model.QualityProfile
 import com.example.model.SupportedFormats
 import com.example.model.TargetFormat
+import com.example.model.VideoCompressionConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -86,6 +87,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _compressionConfig = MutableStateFlow(CompressionConfig())
     val compressionConfig: StateFlow<CompressionConfig> = _compressionConfig.asStateFlow()
 
+    private val _videoConfig = MutableStateFlow(VideoCompressionConfig())
+    val videoConfig: StateFlow<VideoCompressionConfig> = _videoConfig.asStateFlow()
+
     // --- Processing & Progress State ---
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
@@ -138,6 +142,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     targetSizeBytes = halfSize,
                     percentageReduction = 50
                 )
+                _videoConfig.value = _videoConfig.value.copy(
+                    targetSizeBytes = minOf(20L * 1024 * 1024, halfSize)
+                )
             }
         }
     }
@@ -185,6 +192,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             targetSizeBytes = halfSize,
             percentageReduction = 50
         )
+        _videoConfig.value = _videoConfig.value.copy(
+            targetSizeBytes = minOf(20L * 1024 * 1024, halfSize)
+        )
     }
 
     fun clearSelection() {
@@ -196,25 +206,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Configuration Setters ---
     fun setTargetFormat(format: TargetFormat) { _targetFormat.value = format }
-    fun setCompressionMode(mode: CompressionMode) { _compressionConfig.value = _compressionConfig.value.copy(mode = mode) }
+
+    fun setCompressionMode(mode: CompressionMode) {
+        _compressionConfig.value = _compressionConfig.value.copy(mode = mode)
+    }
+
     fun setTargetSizeBytes(bytes: Long) {
         _compressionConfig.value = _compressionConfig.value.copy(
             mode = CompressionMode.EXACT_TARGET_SIZE,
             targetSizeBytes = bytes
         )
+        _videoConfig.value = _videoConfig.value.copy(targetSizeBytes = bytes)
     }
+
     fun setPercentageReduction(percent: Int) {
         _compressionConfig.value = _compressionConfig.value.copy(
             mode = CompressionMode.PERCENTAGE_REDUCTION,
             percentageReduction = percent
         )
     }
+
     fun setQualityProfile(profile: QualityProfile) {
         _compressionConfig.value = _compressionConfig.value.copy(
             mode = CompressionMode.QUALITY_PRESET,
             qualityProfile = profile
         )
     }
+
+    fun setVideoConfig(config: VideoCompressionConfig) {
+        _videoConfig.value = config
+        _compressionConfig.value = _compressionConfig.value.copy(
+            mode = CompressionMode.EXACT_TARGET_SIZE,
+            targetSizeBytes = config.targetSizeBytes
+        )
+    }
+
     fun setMetadataConfig(config: MetadataConfig) { _metadataConfig.value = config }
     fun setSearchQuery(query: String) { _searchQuery.value = query }
 
@@ -284,7 +310,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // Single Atomic Database Transaction for all records
                 if (recordsToInsert.isNotEmpty()) {
                     repository.insertBatch(recordsToInsert)
                 }
@@ -312,6 +337,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val files = _selectedFiles.value
         if (files.isEmpty() || _isProcessing.value) return
         val config = _compressionConfig.value.copy(metadataConfig = _metadataConfig.value)
+        val vidConfig = _videoConfig.value
 
         activeJob = viewModelScope.launch {
             _isProcessing.value = true
@@ -333,6 +359,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         context = getApplication(),
                         source = file,
                         config = config,
+                        videoConfig = vidConfig,
                         onProgress = { p, status ->
                             val overall = baseProgress + (p / files.size.toFloat())
                             _progress.value = overall
@@ -354,13 +381,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 mode = "COMPRESS",
                                 durationMs = result.durationMs,
                                 outputPath = result.outputPath ?: "",
-            					metadataSummary = result.metadataPreservedSummary ?: ""
+                                metadataSummary = result.metadataPreservedSummary ?: ""
                             )
                         )
                     }
                 }
 
-                // Single Atomic Database Transaction
                 if (recordsToInsert.isNotEmpty()) {
                     repository.insertBatch(recordsToInsert)
                 }
@@ -424,8 +450,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun shareFile(context: Context, filePath: String?) {
-    	val path = filePath ?: return
-        val uri = resolveShareableUri(context, filePath) ?: return
+        val path = filePath ?: return
+        val uri = resolveShareableUri(context, path) ?: return
         val mime = inferMimeType(path)
         try {
             val intent = Intent(Intent.ACTION_SEND).apply {
@@ -462,8 +488,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openFile(context: Context, filePath: String?) {
-    	val path = filePath ?: return
-        val uri = resolveShareableUri(context, filePath) ?: return
+        val path = filePath ?: return
+        val uri = resolveShareableUri(context, path) ?: return
         val mime = inferMimeType(path)
         try {
             val intent = Intent(Intent.ACTION_VIEW).apply {

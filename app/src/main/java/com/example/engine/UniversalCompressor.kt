@@ -1,6 +1,5 @@
 package com.example.engine
 
-import kotlinx.coroutines.launch
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -10,15 +9,23 @@ import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.media.MediaCodec
+import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
-import android.net.Uri
 import android.os.Build
+import androidx.annotation.OptIn
+import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.ChannelMixingAudioProcessor
+import androidx.media3.common.audio.ChannelMixingMatrix
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.Presentation
+import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
@@ -34,25 +41,26 @@ import com.example.model.ConversionJobResult
 import com.example.model.FileCategory
 import com.example.model.FileDetails
 import com.example.model.QualityProfile
+import com.example.model.VideoCodec
+import com.example.model.VideoCompressionConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.util.zip.Deflater
-import java.util.zip.GZIPOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlin.math.abs
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 object UniversalCompressor {
 
@@ -60,6 +68,7 @@ object UniversalCompressor {
         context: Context,
         source: FileDetails,
         config: CompressionConfig,
+        videoConfig: VideoCompressionConfig = VideoCompressionConfig(),
         onProgress: (Float, String) -> Unit
     ): ConversionJobResult = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
@@ -85,7 +94,13 @@ object UniversalCompressor {
             }
         }
 
-        val targetLabel = FileDetails.formatBytes(targetBytes)
+        val effectiveTargetBytes = if (source.category == FileCategory.VIDEO && config.mode == CompressionMode.EXACT_TARGET_SIZE) {
+            videoConfig.targetSizeBytes
+        } else {
+            targetBytes
+        }
+
+        val targetLabel = FileDetails.formatBytes(effectiveTargetBytes)
         onProgress(0.05f, "Target budget: $targetLabel")
 
         val outputFile: File
@@ -97,36 +112,40 @@ object UniversalCompressor {
                 source.category == FileCategory.IMAGE -> {
                     val outExt = if (ext in listOf("png", "webp", "jpg", "jpeg")) ext else "jpg"
                     outputFile = File(outputDir, "${baseName}_compressed.$outExt")
-                    mime = if (outExt == "png") "image/png" else if (outExt == "webp") "image/webp" else "image/jpeg"
-                    compressImageIcStyle(context, source, outputFile, targetBytes, onProgress)
+                    mime = when (outExt) {
+                        "png" -> "image/png"
+                        "webp" -> "image/webp"
+                        else -> "image/jpeg"
+                    }
+                    compressImageIcStyle(context, source, outputFile, effectiveTargetBytes, onProgress)
                 }
 
                 // 2. VIDEO: JoshAtticus/Compressor Hardware-Accelerated Media3 Architecture
                 source.category == FileCategory.VIDEO -> {
                     outputFile = File(outputDir, "${baseName}_compressed.mp4")
                     mime = "video/mp4"
-                    compressVideoJoshAtticusStyle(context, source, outputFile, targetBytes, onProgress)
+                    compressVideoJoshAtticusStyle(context, source, outputFile, effectiveTargetBytes, videoConfig, onProgress)
                 }
 
-                // 3. AUDIO: Full Duration Preservation with AAC Transcoding
+                // 3. AUDIO: Full Duration Preservation
                 source.category == FileCategory.AUDIO -> {
                     outputFile = File(outputDir, "${baseName}_compressed.m4a")
                     mime = "audio/mp4"
-                    compressAudioWithBitrate(context, source, outputFile, targetBytes, onProgress)
+                    compressAudioWithBitrate(context, source, outputFile, effectiveTargetBytes, onProgress)
                 }
 
                 // 4. PDF: Smart Page Downsampling
                 source.extension.equals("pdf", ignoreCase = true) -> {
                     outputFile = File(outputDir, "${baseName}_compressed.pdf")
                     mime = "application/pdf"
-                    compressPdf(context, source, outputFile, targetBytes, onProgress)
+                    compressPdf(context, source, outputFile, effectiveTargetBytes, onProgress)
                 }
 
-                // 5. TEXT / DATA / CODE: Lossless Minification (No corrupt truncation)
+                // 5. TEXT / DATA / CODE: Lossless Minification
                 source.category == FileCategory.CODE_DATA || ext in listOf("txt", "json", "csv", "xml", "html", "md", "sql") -> {
                     outputFile = File(outputDir, "${baseName}_compressed.$ext")
                     mime = source.mimeType
-                    compressTextLosslessly(context, source, outputFile, targetBytes, onProgress)
+                    compressTextLosslessly(context, source, outputFile, onProgress)
                 }
 
                 // 6. Generic Binaries: Max Deflate Level 9 Zip
@@ -137,7 +156,7 @@ object UniversalCompressor {
                 }
             }
 
-            // Apply metadata preferences
+            // Apply metadata preferences for images
             if (!config.metadataConfig.stripAllForPrivacy && source.category == FileCategory.IMAGE) {
                 MetadataHelper.applyMetadataPreferences(context, source.uri, outputFile, config.metadataConfig, source.timestamp)
             }
@@ -196,7 +215,6 @@ object UniversalCompressor {
         val origW = bounds.outWidth.coerceAtLeast(1)
         val origH = bounds.outHeight.coerceAtLeast(1)
 
-        // Subsample decode to prevent OOM
         var sampleSize = 1
         while ((origW / sampleSize) > 3840 || (origH / sampleSize) > 3840) {
             sampleSize *= 2
@@ -218,7 +236,6 @@ object UniversalCompressor {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.JPEG
             }
             source.extension.equals("png", ignoreCase = true) && targetBytes < (source.size * 0.6) -> {
-                // If aggressive compression on PNG without alpha, switch to WebP/JPEG for 80% savings
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.JPEG
             }
             else -> Bitmap.CompressFormat.JPEG
@@ -226,10 +243,8 @@ object UniversalCompressor {
 
         onProgress(0.35f, "Calculating perceptual resolution tiers...")
 
-        // Step 1: Test at original resolution with sweet-spot quality search (55 to 88)
         var bestBytes = searchQualityBudget(baseBitmap, format, targetBytes, minQ = 55, maxQ = 88)
 
-        // Step 2: If target is not met, scale down resolution progressively while keeping quality clean
         if (bestBytes.isEmpty() || bestBytes.size > targetBytes) {
             val scaleTiers = listOf(0.85f, 0.70f, 0.55f, 0.40f, 0.30f, 0.20f, 0.12f)
             for (scale in scaleTiers) {
@@ -248,9 +263,13 @@ object UniversalCompressor {
             }
         }
 
-        // Step 3: Extreme fallback if targetBytes is very low
         if (bestBytes.isEmpty() || bestBytes.size > targetBytes) {
-            val micro = Bitmap.createScaledBitmap(baseBitmap, 320, (320f * origH / origW).roundToInt().coerceAtLeast(32), true)
+            val micro = Bitmap.createScaledBitmap(
+                baseBitmap,
+                320,
+                (320f * origH / origW).roundToInt().coerceAtLeast(32),
+                true
+            )
             bestBytes = testCompress(micro, Bitmap.CompressFormat.JPEG, 35)
             micro.recycle()
         }
@@ -276,7 +295,7 @@ object UniversalCompressor {
             val bytes = testCompress(bmp, format, mid)
             if (bytes.size <= targetBytes) {
                 best = bytes
-                low = mid + 1 // Try higher quality within budget
+                low = mid + 1
             } else {
                 high = mid - 1
             }
@@ -291,24 +310,29 @@ object UniversalCompressor {
     }
 
     // =========================================================================
-    // VIDEO COMPRESSION ENGINE (JoshAtticus/Compressor Media3 Architecture)
+    // VIDEO COMPRESSION ENGINE (Media3 Full Control: Codec, Res, FPS, Audio)
     // =========================================================================
+    @OptIn(UnstableApi::class)
     private suspend fun compressVideoJoshAtticusStyle(
         context: Context,
         source: FileDetails,
         outputFile: File,
         targetBytes: Long,
+        videoConfig: VideoCompressionConfig,
         onProgress: (Float, String) -> Unit
     ) {
-        onProgress(0.15f, "Analyzing video metadata and bitrate budget...")
+        onProgress(0.15f, "Inspecting video streams...")
 
         val (durationMs, origHeight) = withContext(Dispatchers.IO) {
             val retriever = MediaMetadataRetriever()
-            var dur = 1000L
+            var dur = 10_000L
             var h = 1080
             try {
-                retriever.setDataSource(context, source.uri)
-                dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 1000L
+                context.contentResolver.openFileDescriptor(source.uri, "r")?.use { pfd ->
+                    retriever.setDataSource(pfd.fileDescriptor)
+                } ?: retriever.setDataSource(context, source.uri)
+
+                dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 10_000L
                 h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 1080
             } catch (_: Exception) {
             } finally {
@@ -318,38 +342,78 @@ object UniversalCompressor {
         }
 
         val durationSec = (durationMs / 1000.0).coerceAtLeast(1.0)
-        val audioBitrate = 96_000 // 96 kbps AAC audio
-        val audioBudgetBits = audioBitrate * durationSec
+        val audioBitrateBps = if (videoConfig.removeAudio) 0 else videoConfig.audioBitrateKbps * 1000
+        val audioBudgetBits = audioBitrateBps * durationSec
         val totalBits = (targetBytes * 8).toDouble()
 
-        val videoBudgetBits = (totalBits - audioBudgetBits).coerceAtLeast(totalBits * 0.7)
-        val calculatedVideoBitrate = (videoBudgetBits / durationSec).toInt().coerceIn(180_000, 15_000_000)
+        val videoBudgetBits = (totalBits - audioBudgetBits).coerceAtLeast(totalBits * 0.5)
+        val calculatedVideoBitrate = (videoBudgetBits / durationSec).toInt().coerceIn(120_000, 18_000_000)
 
-        // JoshAtticus Resolution Scaling Tier: Downscale if bitrate-per-pixel is too low
+        val requestedHeight = videoConfig.resolution.heightPx
         val targetHeight = when {
+            requestedHeight > 0 -> minOf(origHeight, requestedHeight)
             calculatedVideoBitrate >= 3_000_000 -> minOf(origHeight, 1080)
             calculatedVideoBitrate >= 1_400_000 -> minOf(origHeight, 720)
             calculatedVideoBitrate >= 750_000 -> minOf(origHeight, 540)
             else -> minOf(origHeight, 480)
         }
 
-        onProgress(0.25f, "Hardware encoding: ${targetHeight}p @ ${(calculatedVideoBitrate / 1000)} kbps...")
+        val codecMime = if (videoConfig.codec == VideoCodec.H265) MimeTypes.VIDEO_H265 else MimeTypes.VIDEO_H264
+        val fpsLabel = if (videoConfig.targetFps > 0f) "${videoConfig.targetFps.toInt()}fps" else "Orig FPS"
+        onProgress(0.25f, "Encoding ${targetHeight}p • $fpsLabel • ${calculatedVideoBitrate / 1000} kbps...")
 
-        // Media3 Transformer MUST be constructed, started, and polled on the Main Looper thread
         withContext(Dispatchers.Main) {
             val mediaItem = MediaItem.fromUri(source.uri)
-            val scaleEffect = Presentation.createForHeight(targetHeight)
+
+            // Video Effects: Resolution scaling & optional FPS drop
+            val videoEffects = mutableListOf<Effect>()
+            if (targetHeight in 1 until origHeight) {
+                videoEffects.add(Presentation.createForHeight(targetHeight))
+            }
+            if (videoConfig.targetFps > 0f) {
+                videoEffects.add(FrameDropEffect.createDefaultFrameDropEffect(videoConfig.targetFps))
+            }
+
+            // Audio Processors: Volume gain via ChannelMixingAudioProcessor
+            val audioProcessors = mutableListOf<AudioProcessor>()
+            if (!videoConfig.removeAudio && abs(videoConfig.audioVolume - 1.0f) > 0.04f) {
+                val mixer = ChannelMixingAudioProcessor()
+                for (ch in 1..6) {
+                    val matrix = ChannelMixingMatrix.createForConstantPower(ch, ch).scaleBy(videoConfig.audioVolume)
+                    mixer.putChannelMixingMatrix(matrix)
+                }
+                audioProcessors.add(mixer)
+            }
+
             val editedItem = EditedMediaItem.Builder(mediaItem)
-                .setEffects(Effects(listOf(), listOf(scaleEffect)))
+                .setRemoveAudio(videoConfig.removeAudio)
+                .setEffects(Effects(audioProcessors, videoEffects))
                 .build()
 
             val videoEncoderSettings = VideoEncoderSettings.Builder()
                 .setBitrate(calculatedVideoBitrate)
+                .setBitrateMode(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
                 .build()
 
-            val encoderFactory = DefaultEncoderFactory.Builder(context)
+            val encoderFactoryBuilder = DefaultEncoderFactory.Builder(context)
                 .setRequestedVideoEncoderSettings(videoEncoderSettings)
-                .build()
+                .setEnableFallback(true)
+
+            if (!videoConfig.removeAudio) {
+                encoderFactoryBuilder.setRequestedAudioEncoderSettings(
+                    AudioEncoderSettings.Builder()
+                        .setBitrate(audioBitrateBps)
+                        .build()
+                )
+            }
+
+            val transformerBuilder = Transformer.Builder(context)
+                .setEncoderFactory(encoderFactoryBuilder.build())
+                .setVideoMimeType(codecMime)
+
+            if (!videoConfig.removeAudio) {
+                transformerBuilder.setAudioMimeType(MimeTypes.AUDIO_AAC)
+            }
 
             var transformer: Transformer? = null
             val progressJob = launch {
@@ -369,10 +433,7 @@ object UniversalCompressor {
 
             try {
                 suspendCancellableCoroutine<Unit> { continuation ->
-                    transformer = Transformer.Builder(context)
-                        .setEncoderFactory(encoderFactory)
-                        .setVideoMimeType(MimeTypes.VIDEO_H264)
-                        .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                    transformer = transformerBuilder
                         .addListener(object : Transformer.Listener {
                             override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                                 if (continuation.isActive) continuation.resume(Unit)
@@ -401,7 +462,7 @@ object UniversalCompressor {
     }
 
     // =========================================================================
-    // AUDIO COMPRESSION (Bitrate Scaling - 100% Full Track Duration)
+    // AUDIO COMPRESSION (Full Track Duration)
     // =========================================================================
     private fun compressAudioWithBitrate(
         context: Context,
@@ -415,18 +476,20 @@ object UniversalCompressor {
         val retriever = MediaMetadataRetriever()
         var durationMs = 1000L
         try {
-            retriever.setDataSource(context, source.uri)
+            context.contentResolver.openFileDescriptor(source.uri, "r")?.use { pfd ->
+                retriever.setDataSource(pfd.fileDescriptor)
+            } ?: retriever.setDataSource(context, source.uri)
             durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 1000L
-        } catch (_: Exception) {} finally {
+        } catch (_: Exception) {
+        } finally {
             retriever.release()
         }
 
         val durationSec = (durationMs / 1000.0).coerceAtLeast(1.0)
         val targetBitrate = ((targetBytes * 8) / durationSec).toInt().coerceIn(32_000, 192_000)
 
-        onProgress(0.4f, "Transcoding audio at ${(targetBitrate / 1000)} kbps AAC...")
+        onProgress(0.4f, "Muxing audio stream (${targetBitrate / 1000} kbps target)...")
 
-        // Direct hardware remux / transcode into M4A container
         val extractor = MediaExtractor()
         var muxer: MediaMuxer? = null
         try {
@@ -478,63 +541,68 @@ object UniversalCompressor {
         val pfd = context.contentResolver.openFileDescriptor(source.uri, "r")
             ?: throw IllegalArgumentException("Cannot open PDF")
         val renderer = PdfRenderer(pfd)
-        val pageCount = renderer.pageCount
-        if (pageCount == 0) {
+        val pdfDoc = PdfDocument()
+
+        try {
+            val pageCount = renderer.pageCount
+            if (pageCount == 0) return
+
+            val bytesPerPage = (targetBytes - 2048).coerceAtLeast(1024) / pageCount
+            val (scale, quality) = when {
+                bytesPerPage > 80 * 1024 -> Pair(1.0f, 75)
+                bytesPerPage > 40 * 1024 -> Pair(0.8f, 55)
+                bytesPerPage > 15 * 1024 -> Pair(0.6f, 35)
+                else -> Pair(0.4f, 20)
+            }
+
+            for (i in 0 until pageCount) {
+                onProgress(0.25f + (0.6f * (i.toFloat() / pageCount)), "Compressing page ${i + 1} of $pageCount...")
+                val page = renderer.openPage(i)
+                val origPageW = page.width
+                val origPageH = page.height
+                val w = (origPageW * scale).toInt().coerceAtLeast(100)
+                val h = (origPageH * scale).toInt().coerceAtLeast(100)
+
+                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
+                val canvas = Canvas(bmp)
+                canvas.drawColor(Color.WHITE)
+                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                page.close()
+
+                val pageJpeg = testCompress(bmp, Bitmap.CompressFormat.JPEG, quality)
+                bmp.recycle()
+
+                val compressedPageBmp = BitmapFactory.decodeByteArray(pageJpeg, 0, pageJpeg.size)
+                val pageInfo = PdfDocument.PageInfo.Builder(origPageW, origPageH, i + 1).create()
+                val docPage = pdfDoc.startPage(pageInfo)
+                if (compressedPageBmp != null) {
+                    docPage.canvas.drawBitmap(
+                        compressedPageBmp,
+                        null,
+                        android.graphics.Rect(0, 0, origPageW, origPageH),
+                        Paint(Paint.FILTER_BITMAP_FLAG)
+                    )
+                    compressedPageBmp.recycle()
+                }
+                pdfDoc.finishPage(docPage)
+            }
+
+            onProgress(0.9f, "Finalizing compressed PDF...")
+            FileOutputStream(outputFile).use { pdfDoc.writeTo(it) }
+        } finally {
+            pdfDoc.close()
             renderer.close()
             pfd.close()
-            return
         }
-
-        val bytesPerPage = (targetBytes - 2048).coerceAtLeast(1024) / pageCount
-        val (scale, quality) = when {
-            bytesPerPage > 80 * 1024 -> Pair(1.0f, 75)
-            bytesPerPage > 40 * 1024 -> Pair(0.8f, 55)
-            bytesPerPage > 15 * 1024 -> Pair(0.6f, 35)
-            else -> Pair(0.4f, 20)
-        }
-
-        val pdfDoc = PdfDocument()
-        for (i in 0 until pageCount) {
-            onProgress(0.25f + (0.6f * (i.toFloat() / pageCount)), "Compressing page ${i + 1} of $pageCount...")
-            val page = renderer.openPage(i)
-            val w = (page.width * scale).toInt().coerceAtLeast(100)
-            val h = (page.height * scale).toInt().coerceAtLeast(100)
-
-            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
-            val canvas = Canvas(bmp)
-            canvas.drawColor(Color.WHITE)
-            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            page.close()
-
-            val pageJpeg = testCompress(bmp, Bitmap.CompressFormat.JPEG, quality)
-            bmp.recycle()
-
-            val compressedPageBmp = BitmapFactory.decodeByteArray(pageJpeg, 0, pageJpeg.size)
-            val pageInfo = PdfDocument.PageInfo.Builder(page.width, page.height, i + 1).create()
-            val docPage = pdfDoc.startPage(pageInfo)
-            if (compressedPageBmp != null) {
-                docPage.canvas.drawBitmap(compressedPageBmp, null, android.graphics.Rect(0, 0, page.width, page.height), Paint(Paint.FILTER_BITMAP_FLAG))
-                compressedPageBmp.recycle()
-            }
-            pdfDoc.finishPage(docPage)
-        }
-
-        renderer.close()
-        pfd.close()
-
-        onProgress(0.9f, "Finalizing compressed PDF...")
-        FileOutputStream(outputFile).use { pdfDoc.writeTo(it) }
-        pdfDoc.close()
     }
 
     // =========================================================================
-    // TEXT & CODE (Lossless Compact Minification - Never Corrupt/Truncate!)
+    // TEXT & CODE (Lossless Compact Minification)
     // =========================================================================
     private fun compressTextLosslessly(
         context: Context,
         source: FileDetails,
         outputFile: File,
-        targetBytes: Long,
         onProgress: (Float, String) -> Unit
     ) {
         onProgress(0.3f, "Performing lossless minification...")
