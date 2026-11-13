@@ -379,7 +379,7 @@ object UniversalCompressor {
             if (!videoConfig.removeAudio && abs(videoConfig.audioVolume - 1.0f) > 0.04f) {
                 val mixer = ChannelMixingAudioProcessor()
                 for (ch in 1..6) {
-                    val matrix = ChannelMixingMatrix.createForConstantPower(ch, ch).scaleBy(videoConfig.audioVolume)
+                    val matrix = ChannelMixingMatrix.create(ch, ch).scaleBy(videoConfig.audioVolume)
                     mixer.putChannelMixingMatrix(matrix)
                 }
                 audioProcessors.add(mixer)
