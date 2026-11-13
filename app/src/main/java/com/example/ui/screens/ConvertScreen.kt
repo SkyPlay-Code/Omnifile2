@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,8 +57,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -82,6 +81,52 @@ import com.example.ui.MainViewModel
 import com.example.ui.components.BatchJobResultCard
 import com.example.ui.components.JobResultCard
 import com.example.ui.components.MetadataPreferenceCard
+
+/**
+ * Computes strictly valid, non-corrupting target formats for a single file.
+ */
+private fun getCompatibleFormatIdsForFile(source: FileDetails): Set<String> {
+    val ext = source.extension.lowercase()
+    val universalIds = setOf("zip", "gz", "tar", "base64", "hex", "c_array")
+
+    val specificIds: Set<String> = when {
+        ext == "pdf" -> setOf("png", "jpg", "webp", "txt")
+        source.category == FileCategory.IMAGE -> {
+            val allImg = setOf("jpg", "jpeg", "png", "webp", "bmp", "ico", "pdf", "ascii")
+            val excludeSelf = if (ext in listOf("jpg", "jpeg")) setOf("jpg", "jpeg") else setOf(ext)
+            allImg - excludeSelf
+        }
+        source.category == FileCategory.VIDEO -> setOf("m4a", "wav", "jpg")
+        source.category == FileCategory.AUDIO -> {
+            val audioTargets = setOf("wav", "m4a", "aac")
+            audioTargets - setOf(ext)
+        }
+        ext == "csv" -> setOf("json", "html", "pdf", "txt")
+        ext == "json" -> setOf("csv", "xml", "pdf", "txt")
+        ext in listOf("md", "markdown") -> setOf("html", "pdf", "txt")
+        source.category == FileCategory.DOCUMENT || source.category == FileCategory.CODE_DATA -> {
+            setOf("pdf", "txt") - setOf(ext)
+        }
+        ext in listOf("b64", "base64", "hex") -> setOf("txt")
+        else -> emptySet()
+    }
+
+    return (specificIds + universalIds) - setOf(ext)
+}
+
+/**
+ * Computes the intersection of valid formats across all selected files (Batch safe).
+ */
+private fun getCompatibleTargets(
+    files: List<FileDetails>,
+    allTargets: List<TargetFormat>
+): List<TargetFormat> {
+    if (files.isEmpty()) return emptyList()
+    val commonIds = files
+        .map { getCompatibleFormatIdsForFile(it) }
+        .reduce { acc, ids -> acc.intersect(ids) }
+    return allTargets.filter { it.id in commonIds }
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -119,19 +164,31 @@ fun ConvertScreen(
         if (uris.isNotEmpty()) viewModel.selectUris(uris)
     }
 
-    val categories = remember {
-        listOf(
-            "Recommended",
-            FileCategory.IMAGE.title,
-            FileCategory.DOCUMENT.title,
-            FileCategory.AUDIO.title,
-            FileCategory.ARCHIVE.title,
-            FileCategory.CODE_DATA.title,
-            FileCategory.RAW_BINARY.title
-        )
+    // Only compatible formats for the current selection
+    val compatibleTargets = remember(selectedFiles) {
+        getCompatibleTargets(selectedFiles, SupportedFormats.ALL_TARGETS)
     }
 
-    var selectedCategoryIndex by remember { mutableIntStateOf(0) }
+    // Auto-switch target format if the current one isn't valid for the newly picked file
+    LaunchedEffect(compatibleTargets) {
+        if (compatibleTargets.isNotEmpty() && compatibleTargets.none { it.id == targetFormat.id }) {
+            viewModel.setTargetFormat(compatibleTargets.first())
+        }
+    }
+
+    // Group compatible formats dynamically into "Convert To" vs "Package & Raw"
+    val primaryTargets = remember(compatibleTargets) {
+        compatibleTargets.filter {
+            it.category != FileCategory.ARCHIVE && it.category != FileCategory.RAW_BINARY
+        }
+    }
+    val utilityTargets = remember(compatibleTargets) {
+        compatibleTargets.filter {
+            it.category == FileCategory.ARCHIVE || it.category == FileCategory.RAW_BINARY
+        }
+    }
+
+    var showPackaging by remember { mutableStateOf(false) }
     var showAdvancedSettings by remember { mutableStateOf(false) }
 
     Column(
@@ -186,7 +243,7 @@ fun ConvertScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Images, Audio, Docs, Archives & Code",
+                        text = "Images, Audio, Video, Docs, Archives & Code",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -221,7 +278,7 @@ fun ConvertScreen(
                 }
             }
         } else {
-            // COMPACT FILE TRAY (Takes minimal space, looks organized)
+            // COMPACT FILE TRAY
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -267,7 +324,6 @@ fun ConvertScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Scrollable File Preview Chips
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(selectedFiles.size) { index ->
                             val file = selectedFiles[index]
@@ -315,62 +371,56 @@ fun ConvertScreen(
         }
 
         // =========================================================================
-        // 2. TARGET FORMAT SELECTOR (Visible once files are chosen)
+        // 2. CONTEXT-AWARE COMPATIBLE TARGET FORMATS
         // =========================================================================
         if (selectedFiles.isNotEmpty()) {
-            val primaryFile = selectedFiles.first()
-
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "TARGET FORMAT",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    ),
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Category Chips (Horizontal Scroll)
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    itemsIndexed(categories) { index, title ->
+                    Text(
+                        text = if (primaryTargets.isNotEmpty()) "COMPATIBLE FORMATS" else "PACKAGING & RAW OPTIONS",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        ),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    if (primaryTargets.isNotEmpty() && utilityTargets.isNotEmpty()) {
                         FilterChip(
-                            selected = selectedCategoryIndex == index,
-                            onClick = { selectedCategoryIndex = index },
-                            label = { Text(title, fontSize = 12.sp) },
+                            selected = showPackaging,
+                            onClick = { showPackaging = !showPackaging },
+                            label = {
+                                Text(
+                                    text = if (showPackaging) "Hide Archive/Raw" else "+ Archive & Raw",
+                                    fontSize = 11.sp
+                                )
+                            },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                val visibleFormats = when (selectedCategoryIndex) {
-                    0 -> {
-                        val recommended = SupportedFormats.getRecommendedFor(primaryFile.category, primaryFile.extension)
-                        if (recommended.isNotEmpty()) recommended else SupportedFormats.ALL_TARGETS.take(8)
-                    }
-                    1 -> SupportedFormats.ALL_TARGETS.filter { it.category == FileCategory.IMAGE }
-                    2 -> SupportedFormats.ALL_TARGETS.filter { it.category == FileCategory.DOCUMENT }
-                    3 -> SupportedFormats.ALL_TARGETS.filter { it.category == FileCategory.AUDIO }
-                    4 -> SupportedFormats.ALL_TARGETS.filter { it.category == FileCategory.ARCHIVE }
-                    5 -> SupportedFormats.ALL_TARGETS.filter { it.category == FileCategory.CODE_DATA }
-                    else -> SupportedFormats.ALL_TARGETS.filter { it.category == FileCategory.RAW_BINARY }
+                val displayTargets = when {
+                    primaryTargets.isEmpty() -> utilityTargets
+                    showPackaging -> primaryTargets + utilityTargets
+                    else -> primaryTargets
                 }
 
-                // Sleek, Compact Format Chips Grid
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    visibleFormats.forEach { format ->
+                    for (format in displayTargets) {
                         val isSelected = targetFormat.id == format.id
                         Box(
                             modifier = Modifier
@@ -418,7 +468,7 @@ fun ConvertScreen(
             }
 
             // =========================================================================
-            // 3. COLLAPSIBLE ADVANCED SETTINGS (Keeps screen clean)
+            // 3. COLLAPSIBLE ADVANCED SETTINGS
             // =========================================================================
             Card(
                 modifier = Modifier
@@ -514,7 +564,7 @@ fun ConvertScreen(
                         }
                         Spacer(modifier = Modifier.height(10.dp))
                         LinearProgressIndicator(
-                            progress = { progress },
+                            progress = progress,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(6.dp)
@@ -548,7 +598,7 @@ fun ConvertScreen(
         }
 
         // =========================================================================
-        // 5. JOB RESULTS (Clean Card with Preview)
+        // 5. JOB RESULTS
         // =========================================================================
         if (batchSummary != null && batchSummary.results.size > 1) {
             BatchJobResultCard(

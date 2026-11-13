@@ -1,5 +1,6 @@
 package com.example.engine
 
+import kotlinx.coroutines.launch
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -301,18 +302,19 @@ object UniversalCompressor {
     ) {
         onProgress(0.15f, "Analyzing video metadata and bitrate budget...")
 
-        val retriever = MediaMetadataRetriever()
-        var durationMs = 0L
-        var origWidth = 1920
-        var origHeight = 1080
-
-        try {
-            retriever.setDataSource(context, source.uri)
-            durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 1000L
-            origWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 1920
-            origHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 1080
-        } catch (_: Exception) {} finally {
-            retriever.release()
+        val (durationMs, origHeight) = withContext(Dispatchers.IO) {
+            val retriever = MediaMetadataRetriever()
+            var dur = 1000L
+            var h = 1080
+            try {
+                retriever.setDataSource(context, source.uri)
+                dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 1000L
+                h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 1080
+            } catch (_: Exception) {
+            } finally {
+                retriever.release()
+            }
+            Pair(dur, h)
         }
 
         val durationSec = (durationMs / 1000.0).coerceAtLeast(1.0)
@@ -333,46 +335,67 @@ object UniversalCompressor {
 
         onProgress(0.25f, "Hardware encoding: ${targetHeight}p @ ${(calculatedVideoBitrate / 1000)} kbps...")
 
-        // Configure Media3 Transformer Pipeline
-        val mediaItem = MediaItem.fromUri(source.uri)
-        val scaleEffect = Presentation.createForHeight(targetHeight)
-        val editedItem = EditedMediaItem.Builder(mediaItem)
-            .setEffects(Effects(listOf(), listOf(scaleEffect)))
-            .build()
-
-        val videoEncoderSettings = VideoEncoderSettings.Builder()
-            .setBitrate(calculatedVideoBitrate)
-            .build()
-
-        val encoderFactory = DefaultEncoderFactory.Builder(context)
-            .setRequestedVideoEncoderSettings(videoEncoderSettings)
-            .build()
-
-        suspendCancellableCoroutine<Unit> { continuation ->
-            val transformer = Transformer.Builder(context)
-                .setEncoderFactory(encoderFactory)
-                .setVideoMimeType(MimeTypes.VIDEO_H264)
-                .setAudioMimeType(MimeTypes.AUDIO_AAC)
-                .addListener(object : Transformer.Listener {
-                    override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                        if (continuation.isActive) continuation.resume(Unit)
-                    }
-
-                    override fun onError(
-                        composition: Composition,
-                        exportResult: ExportResult,
-                        exportException: ExportException
-                    ) {
-                        if (continuation.isActive) continuation.resumeWithException(exportException)
-                    }
-                })
+        // Media3 Transformer MUST be constructed, started, and polled on the Main Looper thread
+        withContext(Dispatchers.Main) {
+            val mediaItem = MediaItem.fromUri(source.uri)
+            val scaleEffect = Presentation.createForHeight(targetHeight)
+            val editedItem = EditedMediaItem.Builder(mediaItem)
+                .setEffects(Effects(listOf(), listOf(scaleEffect)))
                 .build()
 
-            transformer.start(editedItem, outputFile.absolutePath)
+            val videoEncoderSettings = VideoEncoderSettings.Builder()
+                .setBitrate(calculatedVideoBitrate)
+                .build()
 
-            // Cancel handling
-            continuation.invokeOnCancellation {
-                transformer.cancel()
+            val encoderFactory = DefaultEncoderFactory.Builder(context)
+                .setRequestedVideoEncoderSettings(videoEncoderSettings)
+                .build()
+
+            var transformer: Transformer? = null
+            val progressJob = launch {
+                val progressHolder = ProgressHolder()
+                while (isActive) {
+                    val t = transformer
+                    if (t != null) {
+                        val state = t.getProgress(progressHolder)
+                        if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
+                            val pct = 0.25f + (progressHolder.progress / 100f) * 0.65f
+                            onProgress(pct, "Encoding video (${progressHolder.progress}%)...")
+                        }
+                    }
+                    delay(250)
+                }
+            }
+
+            try {
+                suspendCancellableCoroutine<Unit> { continuation ->
+                    transformer = Transformer.Builder(context)
+                        .setEncoderFactory(encoderFactory)
+                        .setVideoMimeType(MimeTypes.VIDEO_H264)
+                        .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                        .addListener(object : Transformer.Listener {
+                            override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                                if (continuation.isActive) continuation.resume(Unit)
+                            }
+
+                            override fun onError(
+                                composition: Composition,
+                                exportResult: ExportResult,
+                                exportException: ExportException
+                            ) {
+                                if (continuation.isActive) continuation.resumeWithException(exportException)
+                            }
+                        })
+                        .build()
+
+                    transformer!!.start(editedItem, outputFile.absolutePath)
+
+                    continuation.invokeOnCancellation {
+                        transformer?.cancel()
+                    }
+                }
+            } finally {
+                progressJob.cancel()
             }
         }
     }
