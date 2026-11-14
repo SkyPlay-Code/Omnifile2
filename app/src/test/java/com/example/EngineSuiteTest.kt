@@ -32,9 +32,12 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import java.io.File
 import java.io.FileOutputStream
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 @RunWith(AndroidJUnit4::class)
-@Config(sdk = [28]) // Uses real filesystem public Downloads path in Robolectric for output verification
+@Config(sdk = [28])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class EngineSuiteTest {
 
     private lateinit var context: Context
