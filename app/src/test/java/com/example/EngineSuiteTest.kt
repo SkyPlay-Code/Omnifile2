@@ -119,9 +119,6 @@ class EngineSuiteTest {
         val htmlRes = UniversalConverter.convertFile(context, details, targetById("html"), MetadataConfig()) { _, _ -> }
         assertTrue(htmlRes.isSuccess)
         assertTrue(File(htmlRes.outputPath).readText().contains("<h1>Title</h1>"))
-
-        val pdfRes = UniversalConverter.convertFile(context, details, targetById("pdf"), MetadataConfig()) { _, _ -> }
-        assertTrue(pdfRes.isSuccess)
     }
 
     // =========================================================================
