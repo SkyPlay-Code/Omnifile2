@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Crisp Material Outline Document -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="4.0"
+        android:strokeLineJoin="round"
+        android:pathData="M39,29 L61,29 L75,43 L75,73 Q75,79 69,79 L39,79 Q33,79 33,73 L33,35 Q33,29 39,29 Z" />
+
+    <!-- Folded Corner Crease -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M61,29.5 L61,39 Q61,43 65,43 L74.5,43" />
+
+    <!-- Bold Opposing Arrows (Guaranteed visible on all Material You wallpapers) -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="3.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M43,51 L64,51 M58.5,46.5 L64.5,51 L58.5,55.5" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="3.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M65,67 L44,67 M49.5,62.5 L43.5,67 L49.5,71.5" />
+</vector>
