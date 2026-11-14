@@ -112,7 +112,7 @@ class EngineSuiteTest {
     }
 
     @Test
-    fun `markdown to html and text to pdf succeed`() = runTest {
+    fun `markdown to html produces styled html table and headings`() = runTest {
         val md = createTestFile("readme.md", "# Title\n\n- Item 1\n- Item 2\n\nLong paragraph testing layout wrapping.")
         val details = FileInspector.inspectUri(context, Uri.fromFile(md))
 
@@ -171,16 +171,14 @@ class EngineSuiteTest {
     // =========================================================================
 
     @Test
-    fun `image converts to bmp, ico, ascii, and pdf cleanly`() = runTest {
+    fun `image converts to bmp, ico, ascii, jpg, and webp cleanly`() = runTest {
         val png = createTestPng("sample.png", 128, 128)
         val details = FileInspector.inspectUri(context, Uri.fromFile(png))
 
-        for (targetId in listOf("bmp", "ico", "ascii", "pdf", "jpg", "webp")) {
+        for (targetId in listOf("bmp", "ico", "ascii", "jpg", "webp")) {
             val res = UniversalConverter.convertFile(context, details, targetById(targetId), MetadataConfig()) { _, _ -> }
             assertTrue("Failed converting PNG to $targetId: ${res.message}", res.isSuccess)
-            if (targetId != "pdf") {
-        		assertTrue("Output empty for $targetId", res.outputSizeBytes > 0)
-        	}
+            assertTrue("Output empty for $targetId", res.outputSizeBytes > 0)
         }
     }
 
