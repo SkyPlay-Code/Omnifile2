@@ -1,7 +1,10 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -76,12 +79,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -91,7 +97,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.engine.DeviceCodecInspector
+import com.example.model.AndroidVideoPresetRepositoryFactory
 import com.example.model.BatchJobSummary
 import com.example.model.CompressionConfig
 import com.example.model.CompressionMode
@@ -100,9 +109,9 @@ import com.example.model.FileCategory
 import com.example.model.FileDetails
 import com.example.model.MetadataConfig
 import com.example.model.QualityProfile
+import com.example.model.VideoAudioCodec
 import com.example.model.VideoCodec
-import com.example.model.VideoCompressionConfig
-import com.example.model.VideoPresetStore
+import com.example.model.VideoPresetRepository
 import com.example.model.VideoQualityPreset
 import com.example.model.VideoResolution
 import com.example.model.VideoTargetPreset
@@ -111,6 +120,7 @@ import com.example.ui.components.BatchJobResultCard
 import com.example.ui.components.JobResultCard
 import com.example.ui.components.MetadataPreferenceCard
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -129,6 +139,7 @@ fun CompressScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
     val videoConfig by viewModel.videoConfig.collectAsStateWithLifecycle()
 
@@ -150,6 +161,12 @@ fun CompressScreen(
         if (uris.isNotEmpty()) viewModel.selectUris(uris)
     }
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        viewModel.executeCompression()
+    }
+
     var customSizeInput by remember { mutableStateOf("500") }
     var customUnitMb by remember { mutableStateOf(false) }
     var showAdvancedSettings by remember { mutableStateOf(false) }
@@ -157,11 +174,19 @@ fun CompressScreen(
     // Video Studio State
     val isVideoSelected = selectedFiles.any { it.category == FileCategory.VIDEO }
     var videoStudioTab by remember { mutableIntStateOf(0) } // 0=Presets, 1=Video, 2=Audio
-    var customPresets by remember { mutableStateOf(VideoPresetStore.loadPresets(context)) }
+    val presetRepo = remember(context) { AndroidVideoPresetRepositoryFactory.create(context) }
+    var customPresets by remember { mutableStateOf(VideoPresetRepository.DEFAULT_PRESETS) }
     var showPresetEditor by remember { mutableStateOf(false) }
     var videoDurationMs by remember { mutableLongStateOf(15_000L) }
 
-    // Inspect actual video duration for impossible-size prediction
+    // Load user's saved target presets asynchronously
+    LaunchedEffect(presetRepo) {
+        customPresets = presetRepo.loadPresets()
+    }
+
+    // Probe actual device hardware/software encoders once
+    val deviceCapabilities = remember { DeviceCodecInspector.probeDeviceVideoEncoders() }
+
     LaunchedEffect(selectedFiles) {
         val firstVideo = selectedFiles.firstOrNull { it.category == FileCategory.VIDEO }
         if (firstVideo != null) {
@@ -243,7 +268,10 @@ fun CompressScreen(
                     )
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Button(
                             onClick = { filePicker.launch(arrayOf("*/*")) },
                             shape = RoundedCornerShape(10.dp),
@@ -270,7 +298,6 @@ fun CompressScreen(
                 }
             }
         } else {
-            // COMPACT FILE TRAY
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -356,12 +383,13 @@ fun CompressScreen(
         }
 
         // =========================================================================
-        // 2A. 3-TAB VIDEO COMPRESSION STUDIO (JoshAtticus Style)
+        // 2A. 3-TAB VIDEO COMPRESSION STUDIO (CompressorEdge Architecture)
         // =========================================================================
         if (selectedFiles.isNotEmpty() && isVideoSelected) {
             val totalOrigBytes = selectedFiles.sumOf { it.size }
             val durationSec = (videoDurationMs / 1000.0).coerceAtLeast(1.0)
-            val audioBps = if (videoConfig.removeAudio) 0.0 else videoConfig.audioBitrateKbps * 1000.0
+            val isMuted = videoConfig.isAudioMuted
+            val audioBps = if (isMuted) 0.0 else videoConfig.audioBitrateKbps * 1000.0
             val estTotalBps = (videoConfig.targetSizeBytes * 8.0) / durationSec
             val estVideoKbps = ((estTotalBps - audioBps) / 1000.0).toInt()
 
@@ -376,7 +404,6 @@ fun CompressScreen(
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    // 3 Studio Tabs: Presets | Video | Audio
                     val studioTabs = listOf("Presets", "Video", "Audio")
                     TabRow(
                         selectedTabIndex = videoStudioTab,
@@ -410,7 +437,7 @@ fun CompressScreen(
                     Spacer(modifier = Modifier.height(14.dp))
 
                     // -----------------------------------------------------------------
-                    // TAB A: PRESETS (Quality + Customizable Platform Target Sizes)
+                    // TAB A: PRESETS
                     // -----------------------------------------------------------------
                     if (videoStudioTab == 0) {
                         Text(
@@ -437,19 +464,7 @@ fun CompressScreen(
                                             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
                                         )
                                         .clickable {
-                                            val newRes = when (qp) {
-                                                VideoQualityPreset.HIGH -> VideoResolution.ORIGINAL
-                                                VideoQualityPreset.MEDIUM -> VideoResolution.P1080
-                                                VideoQualityPreset.LOW -> VideoResolution.P720
-                                                VideoQualityPreset.CUSTOM -> videoConfig.resolution
-                                            }
-                                            viewModel.setVideoConfig(
-                                                videoConfig.copy(
-                                                    qualityPreset = qp,
-                                                    resolution = newRes,
-                                                    targetFps = qp.targetFps
-                                                )
-                                            )
+                                            viewModel.setVideoConfig(videoConfig.withQualityPreset(qp))
                                         }
                                         .padding(12.dp)
                                 ) {
@@ -458,7 +473,7 @@ fun CompressScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Column {
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = qp.label,
                                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
@@ -507,7 +522,7 @@ fun CompressScreen(
                                 FilterChip(
                                     selected = selected,
                                     onClick = {
-                                        viewModel.setVideoConfig(videoConfig.copy(targetSizeBytes = preset.sizeBytes))
+                                        viewModel.setVideoConfig(videoConfig.withTargetSizeBytes(preset.sizeBytes))
                                     },
                                     label = {
                                         Text("${preset.name} (${FileDetails.formatBytes(preset.sizeBytes)})", fontSize = 11.sp)
@@ -522,11 +537,11 @@ fun CompressScreen(
                     }
 
                     // -----------------------------------------------------------------
-                    // TAB B: ADVANCED VIDEO (Slider, Codec, Resolution, FPS)
+                    // TAB B: ADVANCED VIDEO (Slider, Enable All Codecs, Res, FPS)
                     // -----------------------------------------------------------------
                     if (videoStudioTab == 1) {
-                        val maxSliderMb = (totalOrigBytes / (1024f * 1024f)).coerceAtLeast(10f)
-                        val currentMb = (videoConfig.targetSizeBytes / (1024f * 1024f)).coerceIn(1f, maxSliderMb)
+                        val maxSliderMb = (totalOrigBytes / 1_000_000f).coerceAtLeast(10f)
+                        val currentMb = (videoConfig.targetSizeBytes / 1_000_000f).coerceIn(1f, maxSliderMb)
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -544,25 +559,79 @@ fun CompressScreen(
                             value = currentMb,
                             onValueChange = { mb ->
                                 viewModel.setVideoConfig(
-                                    videoConfig.copy(
-                                        qualityPreset = VideoQualityPreset.CUSTOM,
-                                        targetSizeBytes = (mb.toLong() * 1024L * 1024L).coerceAtLeast(512 * 1024L)
+                                    videoConfig.withTargetSizeBytes(
+                                        (mb * 1_000_000f).toLong().coerceAtLeast(512_000L)
                                     )
                                 )
                             },
                             valueRange = 1f..maxSliderMb
                         )
 
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Enable All Codecs Toggle (CompressorEdge feature)
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Enable All Codecs",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    Text(
+                                        text = "Unlock VP9, AV1 & software fallback encoders",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = videoConfig.enableAllCodecs,
+                                    onCheckedChange = { enabled ->
+                                        viewModel.setVideoConfig(videoConfig.withEnableAllCodecs(enabled, Build.VERSION.SDK_INT))
+                                    }
+                                )
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(10.dp))
                         Text("VIDEO ENCODING CODEC", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            for (codec in VideoCodec.entries) {
+                        val visibleCodecs = if (videoConfig.enableAllCodecs) {
+                            VideoCodec.entries
+                        } else {
+                            listOf(VideoCodec.H264, VideoCodec.H265)
+                        }
+
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            for (codec in visibleCodecs) {
+                                val cap = deviceCapabilities.firstOrNull { it.mimeType.equals(codec.mimeType, ignoreCase = true) }
+                                val isSupported = codec.isAllowed(videoConfig.enableAllCodecs, Build.VERSION.SDK_INT) && cap == null || cap.hasHardware || (videoConfig.enableAllCodecs && cap.hasSoftware))
+                                val badgeText = when {
+                                    cap?.hasHardware == true -> "⚡ HW"
+                                    cap?.hasSoftware == true -> "🧩 SW"
+                                    else -> "N/A"
+                                }
                                 val selected = videoConfig.codec == codec
+
                                 Box(
                                     modifier = Modifier
-                                        .weight(1f)
+                                        .fillMaxWidth(0.48f)
+                                        .alpha(if (isSupported) 1f else 0.45f)
                                         .clip(RoundedCornerShape(10.dp))
                                         .border(
                                             if (selected) 2.dp else 1.dp,
@@ -570,12 +639,46 @@ fun CompressScreen(
                                             RoundedCornerShape(10.dp)
                                         )
                                         .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface)
-                                        .clickable { viewModel.setVideoConfig(videoConfig.copy(codec = codec)) }
+                                        .clickable(enabled = isSupported) {
+                                            viewModel.setVideoConfig(videoConfig.withCodec(codec, Build.VERSION.SDK_INT))
+                                        }
                                         .padding(10.dp)
                                 ) {
                                     Column {
-                                        Text(codec.label, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
-                                        Text(codec.description, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = codec.label,
+                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Surface(
+                                                color = if (cap?.hasHardware == true) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                                        else MaterialTheme.colorScheme.surfaceVariant,
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = badgeText,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (cap?.hasHardware == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = codec.description,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2
+                                        )
                                     }
                                 }
                             }
@@ -589,9 +692,7 @@ fun CompressScreen(
                                 FilterChip(
                                     selected = videoConfig.resolution == res,
                                     onClick = {
-                                        viewModel.setVideoConfig(
-                                            videoConfig.copy(qualityPreset = VideoQualityPreset.CUSTOM, resolution = res)
-                                        )
+                                        viewModel.setVideoConfig(videoConfig.withResolution(res))
                                     },
                                     label = { Text(res.label, fontSize = 11.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
@@ -607,12 +708,13 @@ fun CompressScreen(
                         Spacer(modifier = Modifier.height(6.dp))
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             val fpsChoices = listOf(Pair("Original", 0f), Pair("60 FPS", 60f), Pair("30 FPS", 30f), Pair("24 FPS", 24f), Pair("15 FPS", 15f))
+                            val currentFps = videoConfig.targetFps ?: 0f
                             for ((label, fps) in fpsChoices) {
                                 FilterChip(
-                                    selected = videoConfig.targetFps == fps,
+                                    selected = currentFps == fps,
                                     onClick = {
                                         viewModel.setVideoConfig(
-                                            videoConfig.copy(qualityPreset = VideoQualityPreset.CUSTOM, targetFps = fps)
+                                            videoConfig.withTargetFps(if (fps <= 0f) null else fps)
                                         )
                                     },
                                     label = { Text(label, fontSize = 11.sp) },
@@ -626,37 +728,90 @@ fun CompressScreen(
                     }
 
                     // -----------------------------------------------------------------
-                    // TAB C: ADVANCED AUDIO (Remove, Bitrate, Volume Gain)
+                    // TAB C: ADVANCED AUDIO (Codec Selection, Remove, Bitrate, Volume)
                     // -----------------------------------------------------------------
                     if (videoStudioTab == 2) {
-                        Row(
+                        Text("AUDIO ENCODING", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        FlowRow(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.VolumeOff, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text("Remove Audio Track", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
-                                    Text("Saves space by stripping audio completely", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            for (ac in VideoAudioCodec.entries) {
+                                val selected = videoConfig.audioCodec == ac
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.48f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .border(
+                                            if (selected) 2.dp else 1.dp,
+                                            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface)
+                                        .clickable {
+                                            viewModel.setVideoConfig(videoConfig.withAudioCodec(ac))
+                                        }
+                                        .padding(10.dp)
+                                ) {
+                                    Column {
+                                        Text(ac.label, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                                        Text(
+                                            text = ac.description,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2
+                                        )
+                                    }
                                 }
                             }
-                            Switch(
-                                checked = videoConfig.removeAudio,
-                                onCheckedChange = { viewModel.setVideoConfig(videoConfig.copy(removeAudio = it)) }
-                            )
                         }
 
-                        if (!videoConfig.removeAudio) {
-                            Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (videoConfig.audioCodec == VideoAudioCodec.COPY) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            ) {
+                                Text(
+                                    text = "Original audio stream will be passed through untouched (fastest, zero quality loss).",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
+                        } else if (videoConfig.audioCodec == VideoAudioCodec.MUTE) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.VolumeOff, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Audio track will be stripped completely, giving maximum bitrate to video.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        } else {
                             Text("AUDIO BITRATE", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.height(6.dp))
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 for (kbps in listOf(48, 64, 96, 128, 192)) {
                                     FilterChip(
                                         selected = videoConfig.audioBitrateKbps == kbps,
-                                        onClick = { viewModel.setVideoConfig(videoConfig.copy(audioBitrateKbps = kbps)) },
+                                        onClick = { viewModel.setVideoConfig(videoConfig.withAudioBitrateKbps(kbps)) },
                                         label = { Text("$kbps kbps", fontSize = 11.sp) },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = MaterialTheme.colorScheme.primary,
@@ -677,7 +832,7 @@ fun CompressScreen(
                             }
                             Slider(
                                 value = videoConfig.audioVolume,
-                                onValueChange = { viewModel.setVideoConfig(videoConfig.copy(audioVolume = it)) },
+                                onValueChange = { viewModel.setVideoConfig(videoConfig.withAudioVolume(it)) },
                                 valueRange = 0.25f..2.0f,
                                 steps = 6
                             )
@@ -715,25 +870,26 @@ fun CompressScreen(
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     if (videoConfig.resolution != VideoResolution.P480 && videoConfig.resolution != VideoResolution.P360) {
                                         OutlinedButton(
-                                            onClick = { viewModel.setVideoConfig(videoConfig.copy(resolution = VideoResolution.P480, qualityPreset = VideoQualityPreset.CUSTOM)) },
+                                            onClick = { viewModel.setVideoConfig(videoConfig.withResolution(VideoResolution.P480)) },
                                             shape = RoundedCornerShape(8.dp)
                                         ) { Text("Drop to 480p", fontSize = 11.sp) }
                                     }
-                                    if (videoConfig.targetFps == 0f || videoConfig.targetFps > 24f) {
+                                    val curFps = videoConfig.targetFps ?: 0f
+                                    if (curFps == 0f || curFps > 24f) {
                                         OutlinedButton(
-                                            onClick = { viewModel.setVideoConfig(videoConfig.copy(targetFps = 24f, qualityPreset = VideoQualityPreset.CUSTOM)) },
+                                            onClick = { viewModel.setVideoConfig(videoConfig.withTargetFps(24f)) },
                                             shape = RoundedCornerShape(8.dp)
                                         ) { Text("Cap 24 FPS", fontSize = 11.sp) }
                                     }
                                     if (videoConfig.codec != VideoCodec.H265) {
                                         OutlinedButton(
-                                            onClick = { viewModel.setVideoConfig(videoConfig.copy(codec = VideoCodec.H265)) },
+                                            onClick = { viewModel.setVideoConfig(videoConfig.withCodec(VideoCodec.H265)) },
                                             shape = RoundedCornerShape(8.dp)
                                         ) { Text("Use H.265", fontSize = 11.sp) }
                                     }
-                                    if (!videoConfig.removeAudio) {
+                                    if (!isMuted) {
                                         OutlinedButton(
-                                            onClick = { viewModel.setVideoConfig(videoConfig.copy(removeAudio = true)) },
+                                            onClick = { viewModel.setVideoConfig(videoConfig.withAudioCodec(VideoAudioCodec.MUTE)) },
                                             shape = RoundedCornerShape(8.dp)
                                         ) { Text("Strip Audio", fontSize = 11.sp) }
                                     }
@@ -760,8 +916,16 @@ fun CompressScreen(
                             }
                             Text("➔", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
                             Column(horizontalAlignment = Alignment.End) {
-                                Text("${videoConfig.codec.label.substringBefore(" ")} • ${videoConfig.resolution.label}", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = accentSavings)
-                                Text(FileDetails.formatBytes(videoConfig.targetSizeBytes), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = accentSavings))
+                                Text(
+                                    text = "${videoConfig.codec.label.substringBefore(" ")} • ${videoConfig.resolution.label} • ${videoConfig.effectiveAudioMode}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    color = accentSavings
+                                )
+                                Text(
+                                    text = FileDetails.formatBytes(videoConfig.targetSizeBytes),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = accentSavings)
+                                )
                             }
                         }
                     }
@@ -771,8 +935,6 @@ fun CompressScreen(
             // =========================================================================
             // 2B. STANDARD COMPRESSION CONFIG (Images, Audio, PDF, Code)
             // =========================================================================
-            val totalBatchBytes = selectedFiles.sumOf { it.size }
-
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -897,7 +1059,10 @@ fun CompressScreen(
                             modifier = Modifier.testTag("percentage_slider")
                         )
 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             for (pct in listOf(25, 50, 75, 90)) {
                                 FilterChip(
                                     selected = compressionConfig.percentageReduction == pct,
@@ -944,7 +1109,7 @@ fun CompressScreen(
         }
 
         // =========================================================================
-        // 3. COLLAPSIBLE METADATA OPTIONS & ACTION BUTTON
+        // 3. COLLAPSIBLE METADATA OPTIONS & ACTION BUTTON / BACKGROUND PROGRESS
         // =========================================================================
         if (selectedFiles.isNotEmpty()) {
             Card(
@@ -992,11 +1157,27 @@ fun CompressScreen(
                         }
                         Spacer(modifier = Modifier.height(10.dp))
                         LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)))
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = { viewModel.cancelActiveJob() },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Cancel Compression")
+                        }
                     }
                 }
             } else {
                 Button(
-                    onClick = { viewModel.executeCompression() },
+                    onClick = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            viewModel.executeCompression()
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth().height(54.dp).testTag("compress_button"),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
@@ -1053,7 +1234,9 @@ fun CompressScreen(
                 ) {
                     Text("Customize Target Presets", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                     IconButton(onClick = {
-                        customPresets = VideoPresetStore.resetDefaults(context)
+                        scope.launch {
+                            customPresets = presetRepo.resetDefaults()
+                        }
                     }) {
                         Icon(Icons.Default.Refresh, "Reset defaults")
                     }
@@ -1083,13 +1266,15 @@ fun CompressScreen(
                                 val updated = customPresets + VideoTargetPreset(
                                     id = "custom_${System.currentTimeMillis()}",
                                     name = newName.trim(),
-                                    sizeBytes = mbVal * 1024L * 1024L,
+                                    sizeBytes = mbVal * 1_000_000L,
                                     isDefault = false
                                 )
-                                customPresets = updated
-                                VideoPresetStore.savePresets(context, updated)
-                                newName = ""
-                                newMb = ""
+                                scope.launch {
+                                    presetRepo.savePresets(updated)
+                                    customPresets = updated
+                                    newName = ""
+                                    newMb = ""
+                                }
                             }
                         }) {
                             Icon(Icons.Default.Add, "Add", tint = MaterialTheme.colorScheme.primary)
@@ -1110,8 +1295,10 @@ fun CompressScreen(
                                 IconButton(
                                     onClick = {
                                         val updated = customPresets.filterNot { it.id == p.id }
-                                        customPresets = updated
-                                        VideoPresetStore.savePresets(context, updated)
+                                        scope.launch {
+                                            presetRepo.savePresets(updated)
+                                            customPresets = updated
+                                        }
                                     },
                                     modifier = Modifier.size(24.dp)
                                 ) {

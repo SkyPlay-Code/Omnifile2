@@ -694,7 +694,7 @@ object UniversalCompressor {
         val effectiveAudioBps = if (requestedMute) 0 else min(requestedAudioBps, (totalBps * 0.25).toInt().coerceIn(24_000, 192_000))
         val calculatedVideoBitrate = (totalBps - effectiveAudioBps).coerceIn(80_000, 18_000_000)
 
-        val requestedShortSide = videoConfig.resolution.heightPx
+        val requestedShortSide = videoConfig.resolution.maxShortSidePx ?: 0
         val smartShortSide = when {
             requestedShortSide > 0 -> requestedShortSide
             calculatedVideoBitrate >= 3_000_000 -> 1080
@@ -706,6 +706,8 @@ object UniversalCompressor {
         val primaryVideoMime = when (videoConfig.codec) {
             VideoCodec.H265 -> MimeTypes.VIDEO_H265
             VideoCodec.H264 -> MimeTypes.VIDEO_H264
+            VideoCodec.VP9 -> MimeTypes.VIDEO_VP9
+            VideoCodec.AV1 -> MimeTypes.VIDEO_AV1
         }
 
         val primaryAudioMime = when {
@@ -722,7 +724,7 @@ object UniversalCompressor {
                 videoMime = primaryVideoMime,
                 audioMime = primaryAudioMime,
                 targetShortSide = smartShortSide,
-                targetFps = videoConfig.targetFps,
+                targetFps = videoConfig.targetFps ?: 0f,
                 useCbrIfSupported = true,
                 allowAllCodecs = enableAllCodecs,
                 preferSoftware = false,
@@ -738,7 +740,7 @@ object UniversalCompressor {
                     videoMime = primaryVideoMime,
                     audioMime = MimeTypes.AUDIO_AAC,
                     targetShortSide = smartShortSide,
-                    targetFps = videoConfig.targetFps,
+                    targetFps = videoConfig.targetFps ?: 0f,
                     useCbrIfSupported = true,
                     allowAllCodecs = enableAllCodecs,
                     preferSoftware = false,

@@ -13,9 +13,9 @@ import com.example.data.ConversionRecord
 import com.example.data.ConversionRepository
 import com.example.engine.DownloadStorageHelper
 import com.example.engine.FileInspector
+import com.example.engine.ProcessingJobCoordinator
+import com.example.engine.ProcessingTaskRequest
 import com.example.engine.SampleFilesGenerator
-import com.example.engine.UniversalCompressor
-import com.example.engine.UniversalConverter
 import com.example.model.BatchJobSummary
 import com.example.model.CompressionConfig
 import com.example.model.CompressionMode
@@ -28,7 +28,6 @@ import com.example.model.TargetFormat
 import com.example.model.VideoCompressionConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -43,7 +42,6 @@ import java.util.ArrayList
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: ConversionRepository
-    private var activeJob: Job? = null
 
     init {
         val database = AppDatabase.getDatabase(application)
@@ -90,21 +88,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _videoConfig = MutableStateFlow(VideoCompressionConfig())
     val videoConfig: StateFlow<VideoCompressionConfig> = _videoConfig.asStateFlow()
 
-    // --- Processing & Progress State ---
-    private val _isProcessing = MutableStateFlow(false)
-    val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
-
-    private val _progress = MutableStateFlow(0f)
-    val progress: StateFlow<Float> = _progress.asStateFlow()
-
-    private val _progressStatus = MutableStateFlow("")
-    val progressStatus: StateFlow<String> = _progressStatus.asStateFlow()
-
-    private val _lastJobResult = MutableStateFlow<ConversionJobResult?>(null)
-    val lastJobResult: StateFlow<ConversionJobResult?> = _lastJobResult.asStateFlow()
-
-    private val _batchSummary = MutableStateFlow<BatchJobSummary?>(null)
-    val batchSummary: StateFlow<BatchJobSummary?> = _batchSummary.asStateFlow()
+    // --- Processing & Progress State (Driven by Background ForegroundService) ---
+    val isProcessing: StateFlow<Boolean> = ProcessingJobCoordinator.isProcessing
+    val progress: StateFlow<Float> = ProcessingJobCoordinator.progress
+    val progressStatus: StateFlow<String> = ProcessingJobCoordinator.progressStatus
+    val lastJobResult: StateFlow<ConversionJobResult?> = ProcessingJobCoordinator.lastJobResult
+    val batchSummary: StateFlow<BatchJobSummary?> = ProcessingJobCoordinator.batchSummary
 
     private val _sampleFiles = MutableStateFlow<List<FileDetails>>(emptyList())
     val sampleFiles: StateFlow<List<FileDetails>> = _sampleFiles.asStateFlow()
@@ -129,8 +118,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             _selectedFiles.value = detailsList
             _selectedFile.value = detailsList.firstOrNull()
-            _lastJobResult.value = null
-            _batchSummary.value = null
+            ProcessingJobCoordinator.clearResults()
 
             detailsList.firstOrNull()?.let { first ->
                 val recommended = SupportedFormats.getRecommendedFor(first.category, first.extension)
@@ -142,8 +130,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     targetSizeBytes = halfSize,
                     percentageReduction = 50
                 )
-                _videoConfig.value = _videoConfig.value.copy(
-                    targetSizeBytes = minOf(20L * 1024 * 1024, halfSize)
+                _videoConfig.value = _videoConfig.value.withTargetSizeBytes(
+                    minOf(20_000_000L, halfSize)
                 )
             }
         }
@@ -159,8 +147,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             current.addAll(newDetails)
             _selectedFiles.value = current
             _selectedFile.value = current.firstOrNull()
-            _lastJobResult.value = null
-            _batchSummary.value = null
+            ProcessingJobCoordinator.clearResults()
         }
     }
 
@@ -170,8 +157,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _selectedFiles.value = current
         _selectedFile.value = current.firstOrNull()
         if (current.isEmpty()) {
-            _lastJobResult.value = null
-            _batchSummary.value = null
+            ProcessingJobCoordinator.clearResults()
         }
     }
 
@@ -180,8 +166,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectSampleFile(sample: FileDetails) {
         _selectedFiles.value = listOf(sample)
         _selectedFile.value = sample
-        _lastJobResult.value = null
-        _batchSummary.value = null
+        ProcessingJobCoordinator.clearResults()
 
         val recommended = SupportedFormats.getRecommendedFor(sample.category, sample.extension)
         if (recommended.isNotEmpty()) {
@@ -192,16 +177,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             targetSizeBytes = halfSize,
             percentageReduction = 50
         )
-        _videoConfig.value = _videoConfig.value.copy(
-            targetSizeBytes = minOf(20L * 1024 * 1024, halfSize)
+        _videoConfig.value = _videoConfig.value.withTargetSizeBytes(
+            minOf(20_000_000L, halfSize)
         )
     }
 
     fun clearSelection() {
         _selectedFiles.value = emptyList()
         _selectedFile.value = null
-        _lastJobResult.value = null
-        _batchSummary.value = null
+        ProcessingJobCoordinator.clearResults()
     }
 
     // --- Configuration Setters ---
@@ -216,7 +200,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             mode = CompressionMode.EXACT_TARGET_SIZE,
             targetSizeBytes = bytes
         )
-        _videoConfig.value = _videoConfig.value.copy(targetSizeBytes = bytes)
+        _videoConfig.value = _videoConfig.value.withTargetSizeBytes(bytes)
     }
 
     fun setPercentageReduction(percent: Int) {
@@ -249,164 +233,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openDownloadsFolder(context: Context) { DownloadStorageHelper.openDownloadsFolder(context) }
 
     fun cancelActiveJob() {
-        activeJob?.cancel()
-        activeJob = null
-        _isProcessing.value = false
-        _progressStatus.value = "Operation cancelled by user"
+        ProcessingJobCoordinator.cancel(getApplication())
     }
 
-    // --- Conversion Engine Execution ---
+    // --- Background ForegroundService Execution ---
     fun executeConversion() {
         val files = _selectedFiles.value
-        if (files.isEmpty() || _isProcessing.value) return
-        val target = _targetFormat.value
-        val metaConfig = _metadataConfig.value
-
-        activeJob = viewModelScope.launch {
-            _isProcessing.value = true
-            _progress.value = 0.02f
-            _progressStatus.value = "Starting conversion of ${files.size} file(s)..."
-            _lastJobResult.value = null
-            _batchSummary.value = null
-
-            val batchStartTime = System.currentTimeMillis()
-            val resultsList = mutableListOf<ConversionJobResult>()
-            val recordsToInsert = mutableListOf<ConversionRecord>()
-
-            try {
-                for (i in files.indices) {
-                    val file = files[i]
-                    val baseProgress = i.toFloat() / files.size.toFloat()
-
-                    val result = UniversalConverter.convertFile(
-                        context = getApplication(),
-                        source = file,
-                        target = target,
-                        metadataConfig = metaConfig,
-                        onProgress = { p, status ->
-                            val overall = baseProgress + (p / files.size.toFloat())
-                            _progress.value = overall
-                            _progressStatus.value = "File ${i + 1}/${files.size} (${file.name}): $status"
-                        }
-                    )
-
-                    resultsList.add(result)
-
-                    if (result.isSuccess) {
-                        recordsToInsert.add(
-                            ConversionRecord(
-                                inputFileName = result.inputName,
-                                inputFileSize = result.inputSizeBytes,
-                                outputFileName = result.outputName,
-                                outputFileSize = result.outputSizeBytes,
-                                fromFormat = file.extension.uppercase(),
-                                toFormat = target.extension.uppercase(),
-                                mode = "CONVERT",
-                                durationMs = result.durationMs,
-                                outputPath = result.outputPath ?: "",
-                                metadataSummary = result.metadataPreservedSummary ?: ""
-                            )
-                        )
-                    }
-                }
-
-                if (recordsToInsert.isNotEmpty()) {
-                    repository.insertBatch(recordsToInsert)
-                }
-
-                _lastJobResult.value = resultsList.lastOrNull()
-                _batchSummary.value = BatchJobSummary(
-                    results = resultsList,
-                    totalDurationMs = System.currentTimeMillis() - batchStartTime,
-                    mode = "CONVERT"
-                )
-                _progress.value = 1.0f
-                _progressStatus.value = "Batch complete! ${resultsList.count { it.isSuccess }}/${files.size} succeeded."
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _progressStatus.value = "Error: ${e.localizedMessage ?: "Conversion halted"}"
-            } finally {
-                _isProcessing.value = false
-                activeJob = null
-            }
-        }
+        if (files.isEmpty() || ProcessingJobCoordinator.isProcessing.value) return
+        ProcessingJobCoordinator.start(
+            context = getApplication(),
+            request = ProcessingTaskRequest.Convert(
+                files = files.toList(),
+                target = _targetFormat.value,
+                metadataConfig = _metadataConfig.value
+            )
+        )
     }
 
-    // --- Compression Engine Execution ---
     fun executeCompression() {
         val files = _selectedFiles.value
-        if (files.isEmpty() || _isProcessing.value) return
+        if (files.isEmpty() || ProcessingJobCoordinator.isProcessing.value) return
         val config = _compressionConfig.value.copy(metadataConfig = _metadataConfig.value)
-        val vidConfig = _videoConfig.value
-
-        activeJob = viewModelScope.launch {
-            _isProcessing.value = true
-            _progress.value = 0.02f
-            _progressStatus.value = "Starting compression of ${files.size} file(s)..."
-            _lastJobResult.value = null
-            _batchSummary.value = null
-
-            val batchStartTime = System.currentTimeMillis()
-            val resultsList = mutableListOf<ConversionJobResult>()
-            val recordsToInsert = mutableListOf<ConversionRecord>()
-
-            try {
-                for (i in files.indices) {
-                    val file = files[i]
-                    val baseProgress = i.toFloat() / files.size.toFloat()
-
-                    val result = UniversalCompressor.compressFile(
-                        context = getApplication(),
-                        source = file,
-                        config = config,
-                        videoConfig = vidConfig,
-                        onProgress = { p, status ->
-                            val overall = baseProgress + (p / files.size.toFloat())
-                            _progress.value = overall
-                            _progressStatus.value = "File ${i + 1}/${files.size} (${file.name}): $status"
-                        }
-                    )
-
-                    resultsList.add(result)
-
-                    if (result.isSuccess) {
-                        recordsToInsert.add(
-                            ConversionRecord(
-                                inputFileName = result.inputName,
-                                inputFileSize = result.inputSizeBytes,
-                                outputFileName = result.outputName,
-                                outputFileSize = result.outputSizeBytes,
-                                fromFormat = file.extension.uppercase(),
-                                toFormat = file.extension.uppercase(),
-                                mode = "COMPRESS",
-                                durationMs = result.durationMs,
-                                outputPath = result.outputPath ?: "",
-                                metadataSummary = result.metadataPreservedSummary ?: ""
-                            )
-                        )
-                    }
-                }
-
-                if (recordsToInsert.isNotEmpty()) {
-                    repository.insertBatch(recordsToInsert)
-                }
-
-                _lastJobResult.value = resultsList.lastOrNull()
-                _batchSummary.value = BatchJobSummary(
-                    results = resultsList,
-                    totalDurationMs = System.currentTimeMillis() - batchStartTime,
-                    mode = "COMPRESS"
-                )
-                _progress.value = 1.0f
-                _progressStatus.value = "Compression complete! ${resultsList.count { it.isSuccess }}/${files.size} succeeded."
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _progressStatus.value = "Error: ${e.localizedMessage ?: "Compression halted"}"
-            } finally {
-                _isProcessing.value = false
-                activeJob = null
-            }
-        }
+        ProcessingJobCoordinator.start(
+            context = getApplication(),
+            request = ProcessingTaskRequest.Compress(
+                files = files.toList(),
+                compressionConfig = config,
+                videoConfig = _videoConfig.value
+            )
+        )
     }
 
     // --- History Deletion Handlers ---
@@ -430,11 +285,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- Safe File Sharing & Opening (Scoped Storage Compatible) ---
+    // --- Safe File Sharing & Opening ---
     private fun resolveShareableUri(context: Context, pathOrUri: String): Uri? {
-        if (pathOrUri.startsWith("content://")) {
-            return Uri.parse(pathOrUri)
-        }
+        if (pathOrUri.startsWith("content://")) return Uri.parse(pathOrUri)
         val file = File(pathOrUri)
         if (!file.exists()) return null
         return try {
