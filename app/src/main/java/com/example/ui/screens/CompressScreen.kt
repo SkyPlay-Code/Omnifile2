@@ -1774,7 +1774,7 @@ fun CompressScreen(
                                     withContext(NonCancellable) { 
 										val resetSucceeded = presetRepo.resetDefaults()
 										check(resetSucceeded) { "Failed to reset presets" }
-										presetRepo.loadPresets() // or VideoPresetRepository.DEFAULT_PRESETS
+										presetRepo.loadPresets() } // or VideoPresetRepository.DEFAULT_PRESETS
                                 }.onSuccess { defaults ->
                                     customPresets = defaults
                                     presetError = null
