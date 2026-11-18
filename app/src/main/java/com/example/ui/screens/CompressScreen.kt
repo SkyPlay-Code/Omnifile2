@@ -1771,7 +1771,10 @@ fun CompressScreen(
                         scope.launch {
                             presetMutex.withLock {
                                 runCatching {
-                                    withContext(NonCancellable) { presetRepo.resetDefaults() }
+                                    withContext(NonCancellable) { 
+										val resetSucceeded = presetRepo.resetDefaults()
+										check(resetSucceeded) { "Failed to reset presets" }
+										presetRepo.loadPresets() // or VideoPresetRepository.DEFAULT_PRESETS
                                 }.onSuccess { defaults ->
                                     customPresets = defaults
                                     presetError = null

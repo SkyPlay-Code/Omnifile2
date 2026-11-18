@@ -303,7 +303,7 @@ object UniversalCompressor {
                             targetBytes = targetBytes,
                             sourceSize = actualSourceSize,
                             config = config,
-                            timestamp = source.timestamp
+                            timestamp = source.timestamp ?: 0L
                         )
                     }
                 }
